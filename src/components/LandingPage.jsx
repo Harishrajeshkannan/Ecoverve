@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import CircularText from './features/CircularText';
+import DecryptedText from './features/DecryptedText';
 import { 
   TreePine, 
   Users, 
@@ -256,11 +258,19 @@ export default function LandingPage(){
               <br />
               Build Tomorrow.
             </h1>
-            
-            <p className="text-xl md:text-2xl text-green-50 mb-12 leading-relaxed max-w-2xl">
-              Join NGOs and volunteers in fighting pollution by planting trees where it matters most. 
-              Together, we can create a greener, healthier future for our communities.
-            </p>
+            <div className='mb-8'>
+              <DecryptedText
+                speed={5}
+                sequential={true}
+                useOriginalCharsOnly={true}
+                revealDirection="start"
+                text="Join NGOs and volunteers in fighting pollution by planting trees where it matters most. Together, we can create a greener, healthier future for our communities.
+                          "
+                animateOn="view"
+                className='text-xl md:text-2xl text-green-50 mb-12 leading-relaxed max-w-2xl'
+                encryptedClassName='text-xl md:text-2xl text-green-50 mb-12 leading-relaxed max-w-2xl'
+              />
+            </div>
             
             <div className="flex flex-col sm:flex-row gap-4">
               <button className="bg-white text-green-600 px-8 py-4 rounded-full font-semibold text-lg hover:bg-green-50 transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transform hover:-translate-y-1">
@@ -275,11 +285,21 @@ export default function LandingPage(){
           </div>
         </div>
         
-        <div className="absolute top-20 right-20 animate-bounce delay-1000">
-          <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
-            <TreePine className="text-white" size={24} />
-          </div>
+        <div className="absolute top-10 right-20 ">
+          <div className='w-200 h-200'>
+          <CircularText 
+                text="PLANT TREES * BUILD A CLEANER FUTURE * "
+                onHover="slowDown"
+                spinDuration={20}
+                className="custom-class "
+          />
+          </div>    
         </div>
+        <div className='absolute bottom-20 right-20'><div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center animate-bounce delay-1000">
+            <TreePine className="text-white" size={24} />
+          </div></div>
+        
+        
       </section>
 
       <section className="py-20 bg-gray-50">
