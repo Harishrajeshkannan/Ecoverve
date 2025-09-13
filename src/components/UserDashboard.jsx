@@ -784,26 +784,6 @@ const UserDashboard = () => {
           </div>
         </div>
 
-        {/* Recommendations */}
-        <div className="px-4 mt-6">
-          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Recommended For You</h3>
-            <div className="space-y-3">
-              {recommendations.slice(0, 2).map((rec, index) => (
-                <div key={index} className="p-3 border border-green-200 rounded-lg bg-green-50">
-                  <h4 className="font-medium text-green-800 text-sm mb-1">{rec.title}</h4>
-                  <p className="text-xs text-green-700">{rec.description}</p>
-                  {rec.location && (
-                    <div className="flex items-center text-xs text-green-600 mt-1">
-                      <MapPin className="h-3 w-3 mr-1" />
-                      {rec.location}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
 
         {/* User Profile Section */}
         <div className="mt-auto p-4 border-t border-gray-200">

@@ -285,16 +285,6 @@ export default function LandingPage(){
           </div>
         </div>
         
-        <div className="absolute top-10 right-20 ">
-          <div className='w-200 h-200'>
-          <CircularText 
-                text="PLANT TREES * BUILD A CLEANER FUTURE * "
-                onHover="slowDown"
-                spinDuration={20}
-                className="custom-class "
-          />
-          </div>    
-        </div>
         <div className='absolute bottom-20 right-20'><div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center animate-bounce delay-1000">
             <TreePine className="text-white" size={24} />
           </div></div>

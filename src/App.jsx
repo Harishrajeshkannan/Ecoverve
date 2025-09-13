@@ -9,10 +9,7 @@ function App() {
 
   return (
     <>
-      <LandingPage />
-      <NGODashboard />
-      <UserDashboard />
-      <DonationPage />
+      <DonationPage/>
     </>
   )
 }
