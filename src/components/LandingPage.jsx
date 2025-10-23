@@ -21,7 +21,13 @@ import {
   ExternalLink
 } from 'lucide-react';
 
-export default function LandingPage(){
+const finalCounts = {
+  trees: 10000,
+  ngos: 50,
+  volunteers: 5000
+};
+
+export default function LandingPage({ navigate }){
   const [counters, setCounters] = useState({
     trees: 0,
     ngos: 0,
@@ -30,11 +36,6 @@ export default function LandingPage(){
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const finalCounts = {
-    trees: 10000,
-    ngos: 50,
-    volunteers: 5000
-  };
 
   useEffect(() => {
     const duration = 2000;
@@ -115,7 +116,7 @@ export default function LandingPage(){
   ];
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white overflow-x-hidden">
       <header className="bg-white shadow-lg">
       <nav aria-label="Global" className="mx-auto flex max-w-7xl items-center justify-between p-6 lg:px-8">
         {/* Logo */}
@@ -258,26 +259,16 @@ export default function LandingPage(){
               <br />
               Build Tomorrow.
             </h1>
-            <div className='mb-8'>
-              <DecryptedText
-                speed={5}
-                sequential={true}
-                useOriginalCharsOnly={true}
-                revealDirection="start"
-                text="Join NGOs and volunteers in fighting pollution by planting trees where it matters most. Together, we can create a greener, healthier future for our communities.
-                          "
-                animateOn="view"
-                className='text-xl md:text-2xl text-green-50 mb-12 leading-relaxed max-w-2xl'
-                encryptedClassName='text-xl md:text-2xl text-green-50 mb-12 leading-relaxed max-w-2xl'
-              />
+            <div className='mb-8 text-xl md:text-2xl text-green-50 mb-12 leading-relaxed max-w-2xl'>
+              Join NGOs and volunteers in fighting pollution by planting trees where it matters most. Together, we can create a greener, healthier future for our communities.
             </div>
             
             <div className="flex flex-col sm:flex-row gap-4">
-              <button className="bg-white text-green-600 px-8 py-4 rounded-full font-semibold text-lg hover:bg-green-50 transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transform hover:-translate-y-1">
+              <button onClick={() => navigate?.('donate')} className="bg-white text-green-600 px-8 py-4 rounded-full font-semibold text-lg hover:bg-green-50 transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transform hover:-translate-y-1">
                 <TreePine size={24} />
                 Join an Activity
               </button>
-              <button className="bg-green-700 text-white px-8 py-4 rounded-full font-semibold text-lg hover:bg-green-800 transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transform hover:-translate-y-1">
+              <button onClick={() => navigate?.('donate')} className="bg-green-700 text-white px-8 py-4 rounded-full font-semibold text-lg hover:bg-green-800 transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transform hover:-translate-y-1">
                 <Heart size={24} />
                 Donate Now
               </button>

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../lib/supabaseClient'
 import { 
   TreePine, 
   DollarSign, 
@@ -22,6 +23,7 @@ import {
   MessageCircle,
   Share,
   Bell,
+  LogOut,
   Search,
   Filter,
   MoreVertical,
@@ -44,45 +46,343 @@ import {
 const NGODashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [activeSubSection, setActiveSubSection] = useState(null);
-  const [activities, setActivities] = useState([
-    {
-      id: 1,
-      title: "Tree Plantation Drive - Central Park",
-      description: "Community tree planting event to increase green cover in urban areas. Join us for a day of environmental action and community building.",
-      date: "2024-10-15",
-      location: "Central Park, Downtown",
-      expectedVolunteers: 25,
-      registeredVolunteers: 18,
-      status: "upcoming",
-      saplings: 50,
-      category: "Plantation",
-      priority: "high",
-      image: null,
-      volunteers: [
-        { name: "Sarah Johnson", joined: "2024-09-01", points: 45 },
-        { name: "Mike Chen", joined: "2024-09-05", points: 32 },
-        { name: "Emma Davis", joined: "2024-09-10", points: 28 }
-      ]
-    },
-    {
-      id: 2,
-      title: "Riverbank Restoration",
-      description: "Planting native species along the riverbank to prevent erosion and restore natural habitat for local wildlife.",
-      date: "2024-09-20",
-      location: "River Valley, Sector 12",
-      expectedVolunteers: 15,
-      registeredVolunteers: 20,
-      status: "completed",
-      saplings: 75,
-      category: "Restoration",
-      priority: "medium",
-      image: null,
-      volunteers: [
-        { name: "Alex Kumar", joined: "2024-08-15", points: 67 },
-        { name: "Lisa Park", joined: "2024-08-20", points: 54 }
-      ]
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    try {
+      setLoggingOut(true)
+      await supabase.auth.signOut()
+    } catch (error) {
+      console.error('Logout error', error)
+    } finally {
+      setLoggingOut(false)
     }
+  }
+  const [activities, setActivities] = useState([
+    
+    
   ]);
+
+  const [dashboardData, setDashboardData] = useState(null)
+  const [ngoDetails, setNgoDetails] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [createLoading, setCreateLoading] = useState(false)
+  const [createError, setCreateError] = useState(null)
+  const [createSuccess, setCreateSuccess] = useState(null)
+  const [updateLoading, setUpdateLoading] = useState(false)
+  const [deletingIds, setDeletingIds] = useState(new Set())
+
+  // Helper to compute status from date
+  const computeActivityStatus = (dateStr, existingStatus) => {
+    if (!dateStr) return existingStatus ?? 'upcoming'
+    try {
+      const activityDate = new Date(dateStr)
+      // normalize to local date (midnight)
+      const aDay = new Date(activityDate.getFullYear(), activityDate.getMonth(), activityDate.getDate())
+      const today = new Date()
+      const tDay = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+      if (aDay.getTime() < tDay.getTime()) return 'completed'
+      if (aDay.getTime() === tDay.getTime()) return 'ongoing'
+      return 'upcoming'
+    } catch {
+      return existingStatus ?? 'upcoming'
+    }
+  }
+
+  // Reconcile activity statuses in DB and ensure ngo_dashboard.activities_completed is exact
+  const reconcileActivityStatuses = useCallback(async () => {
+    try {
+      const { data: userData, error: userErr } = await supabase.auth.getUser()
+      if (userErr) throw userErr
+      const user = userData?.user
+      if (!user) return
+      const ngoId = user.id
+
+      // Fetch all activities for this NGO
+      const { data: acts, error: actsErr } = await supabase
+        .from('ngo_activities')
+        .select('*')
+        .eq('ngo_id', ngoId)
+
+      if (actsErr) throw actsErr
+
+      // Build list of updates where computed status differs from stored status
+      const updates = []
+      let computedCompletedCount = 0
+      for (const a of (acts ?? [])) {
+        const expected = computeActivityStatus(a.activity_date, a.status ?? 'upcoming')
+        if (expected === 'completed') computedCompletedCount += 1
+        if ((a.status ?? 'upcoming') !== expected) {
+          updates.push({ id: a.id, status: expected })
+        }
+      }
+
+      // Apply updates in a single bulk update using .update().in() if any
+      if (updates.length > 0) {
+        // Perform updates individually to preserve simplicity and compat with RLS
+        for (const u of updates) {
+          const { error: upErr } = await supabase
+            .from('ngo_activities')
+            .update({ status: u.status })
+            .eq('id', u.id)
+
+          if (upErr) console.error('Failed to update activity status', u.id, upErr)
+        }
+      }
+
+      // Now ensure dashboard has exact completed count
+      const { data: dash, error: dashErr } = await supabase
+        .from('ngo_dashboard')
+        .select('*')
+        .eq('ngo_id', ngoId)
+        .maybeSingle()
+
+      if (dashErr) throw dashErr
+
+      if (dash) {
+        if ((dash.activities_completed ?? 0) !== computedCompletedCount) {
+          const { error: upDashErr } = await supabase
+            .from('ngo_dashboard')
+            .update({ activities_completed: computedCompletedCount, updated_at: new Date() })
+            .eq('id', dash.id)
+
+          if (upDashErr) throw upDashErr
+          setDashboardData(prev => ({ ...(prev ?? {}), activities_completed: computedCompletedCount }))
+        } else {
+          // keep local copy in sync
+          setDashboardData(prev => ({ ...(prev ?? {}), activities_completed: computedCompletedCount }))
+        }
+      } else {
+        // create dashboard row if missing
+        const { data: inserted, error: insErr } = await supabase
+          .from('ngo_dashboard')
+          .insert({ ngo_id: ngoId, activities_completed: computedCompletedCount })
+          .select()
+          .single()
+
+        if (insErr) throw insErr
+        setDashboardData(inserted)
+      }
+
+      // Refresh local activities state to reflect updated statuses
+      const refreshed = (await supabase.from('ngo_activities').select('*').eq('ngo_id', ngoId).order('activity_date', { ascending: false })).data
+      const mapped = (refreshed ?? []).map(a => ({
+        id: a.id,
+        title: a.title,
+        description: a.description,
+        date: a.activity_date,
+        location: a.location,
+        expectedVolunteers: a.volunteer_capacity ?? 0,
+        registeredVolunteers: a.volunteer_count ?? 0,
+        status: computeActivityStatus(a.activity_date, a.status ?? 'upcoming'),
+        saplings: 0,
+        category: a.category ?? 'General',
+        priority: 'medium',
+        image: null,
+        volunteers: []
+      }))
+      setActivities(mapped)
+
+    } catch (err) {
+      console.error('Error reconciling activity statuses', err)
+    }
+  }, [])
+
+  // Helper to adjust activities_completed in ngo_dashboard
+  const adjustActivitiesCompleted = async (delta) => {
+    try {
+      const ngoId = ngoDetails?.id
+      if (!ngoId || !delta) return
+
+      // read existing dashboard row
+      const { data: dash, error: dashErr } = await supabase
+        .from('ngo_dashboard')
+        .select('*')
+        .eq('ngo_id', ngoId)
+        .maybeSingle()
+
+      if (dashErr) throw dashErr
+
+      if (dash) {
+        const newCount = Math.max(0, (dash.activities_completed ?? 0) + delta)
+        const { error: upErr } = await supabase
+          .from('ngo_dashboard')
+          .update({ activities_completed: newCount, updated_at: new Date() })
+          .eq('id', dash.id)
+
+        if (upErr) throw upErr
+        setDashboardData(prev => ({ ...(prev ?? {}), activities_completed: newCount }))
+      } else {
+        // create dashboard row if missing
+        const { data: inserted, error: insErr } = await supabase
+          .from('ngo_dashboard')
+          .insert({ ngo_id: ngoId, activities_completed: Math.max(0, delta) })
+          .select()
+          .single()
+
+        if (insErr) throw insErr
+        setDashboardData(inserted)
+      }
+    } catch (err) {
+      console.error('Error adjusting activities_completed', err)
+    }
+  }
+
+  // Profile form state
+  const [profileForm, setProfileForm] = useState({
+    name: '',
+    sector: '',
+    address: '',
+    email: '',
+    phone: '',
+    description: '',
+    website: ''
+  })
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileError, setProfileError] = useState(null)
+  const [profileSuccess, setProfileSuccess] = useState(null)
+
+  useEffect(() => {
+    let mounted = true
+    const load = async () => {
+      setLoading(true)
+      try {
+        // Get current authenticated user
+        const { data: userData, error: userError } = await supabase.auth.getUser()
+        if (userError) throw userError
+        const user = userData?.user
+        if (!user) {
+          setError('No authenticated user')
+          setLoading(false)
+          return
+        }
+
+        // Fetch ngo_details where id = auth user id
+        const { data: ngo, error: ngoErr } = await supabase
+          .from('ngo_details')
+          .select('*')
+          .eq('id', user.id)
+          .single()
+
+        if (ngoErr && ngoErr.code !== 'PGRST116') {
+          // PGRST116: No rows found (some PostgREST versions). We'll continue with null ngo
+          console.warn('ngo_details fetch warning', ngoErr)
+        }
+
+        if (mounted) setNgoDetails(ngo ?? null)
+
+        const ngoId = ngo?.id ?? null
+
+        if (ngoId) {
+          // Fetch dashboard row for this NGO
+          const { data: dash, error: dashErr } = await supabase
+            .from('ngo_dashboard')
+            .select('*')
+            .eq('ngo_id', ngoId)
+            .maybeSingle()
+
+          if (dashErr) throw dashErr
+          if (mounted) setDashboardData(dash ?? null)
+
+          // Fetch activities
+          const { data: acts, error: actsErr } = await supabase
+            .from('ngo_activities')
+            .select('*')
+            .eq('ngo_id', ngoId)
+            .order('activity_date', { ascending: false })
+
+          if (actsErr) throw actsErr
+
+          // Map DB rows to UI-friendly activity objects
+          const mapped = (acts ?? []).map(a => ({
+            id: a.id,
+            title: a.title,
+            description: a.description,
+            date: a.activity_date,
+            location: a.location,
+            expectedVolunteers: a.volunteer_capacity ?? 0,
+            registeredVolunteers: a.volunteer_count ?? 0,
+            status: computeActivityStatus(a.activity_date, a.status ?? 'upcoming'),
+            saplings: 0, // not available in schema, fallback to 0
+            category: a.category ?? 'General',
+            priority: 'medium',
+            image: null,
+            volunteers: []
+          }))
+
+          if (mounted) setActivities(mapped)
+          // reconcile statuses and dashboard counts after initial load
+          if (mounted) {
+            // fire-and-forget reconciliation
+            reconcileActivityStatuses()
+          }
+        }
+
+        setError(null)
+      } catch (err) {
+        console.error('Error loading NGO dashboard data', err)
+        if (mounted) setError(err.message || String(err))
+      } finally {
+        if (mounted) setLoading(false)
+      }
+    }
+
+    load()
+    return () => { mounted = false }
+  }, [reconcileActivityStatuses])
+
+  // sync profile form when ngoDetails loads
+  useEffect(() => {
+    if (ngoDetails) {
+      setProfileForm({
+        name: ngoDetails.name ?? '',
+        sector: ngoDetails.sector ?? '',
+        address: ngoDetails.address ?? '',
+        email: ngoDetails.email ?? '',
+        phone: ngoDetails.phone ?? '',
+        description: ngoDetails.description ?? '',
+        website: ngoDetails.website ?? ''
+      })
+    }
+  }, [ngoDetails])
+
+  const handleUpdateProfile = async () => {
+    setProfileError(null)
+    setProfileSuccess(null)
+    setProfileLoading(true)
+    try {
+      const { data: userData, error: userErr } = await supabase.auth.getUser()
+      if (userErr) throw userErr
+      const user = userData?.user
+      if (!user) throw new Error('Not authenticated')
+
+      const payload = {
+        id: user.id,
+        name: profileForm.name || null,
+        sector: profileForm.sector || null,
+        address: profileForm.address || null,
+        email: profileForm.email || null,
+        phone: profileForm.phone || null,
+        description: profileForm.description || null,
+        website: profileForm.website || null
+      }
+
+      const { data, error } = await supabase
+        .from('ngo_details')
+        .upsert(payload, { returning: 'representation' })
+
+      if (error) throw error
+
+      setNgoDetails(data?.[0] ?? null)
+      setProfileSuccess('Profile updated')
+    } catch (err) {
+      console.error('Error updating profile', err)
+      setProfileError(err?.message || String(err))
+    } finally {
+      setProfileLoading(false)
+    }
+  }
 
   const [newActivity, setNewActivity] = useState({
     title: '',
@@ -95,20 +395,20 @@ const NGODashboard = () => {
     priority: 'medium'
   });
 
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  
   const [editingActivity, setEditingActivity] = useState(null);
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   
   // Enhanced mock data for dashboard stats
   const dashboardStats = {
-    totalSaplings: 2850,
-    totalDonations: 45600,
-    totalVolunteers: 324,
-    ongoingActivities: 3,
-    completedActivities: 12,
+    totalSaplings: dashboardData?.total_saplings ?? 2850,
+    totalDonations: dashboardData?.total_donation ?? 45600,
+    totalVolunteers: dashboardData?.total_volunteers ?? 324,
+    ongoingActivities: activities.filter(a => a.status === 'ongoing').length,
+    completedActivities: dashboardData?.activities_completed ?? activities.filter(a => a.status === 'completed').length,
     monthlyGrowth: 15.3,
-    averageVolunteersPerActivity: 18,
+    averageVolunteersPerActivity: dashboardData?.total_volunteers ? Math.round(dashboardData.total_volunteers / Math.max(1, activities.length)) : 18,
     topPerformer: "Riverbank Restoration"
   };
 
@@ -135,19 +435,66 @@ const NGODashboard = () => {
     }
   ];
 
-  const handleCreateActivity = () => {
-    if (newActivity.title && newActivity.date && newActivity.location) {
-      const activity = {
-        id: Date.now(),
-        ...newActivity,
-        expectedVolunteers: parseInt(newActivity.expectedVolunteers) || 0,
-        saplings: parseInt(newActivity.saplings) || 0,
-        registeredVolunteers: 0,
+  const handleCreateActivity = async () => {
+    setCreateError(null)
+    setCreateSuccess(null)
+    if (!(newActivity.title && newActivity.date && newActivity.location)) {
+      setCreateError('Please fill required fields: title, date and location')
+      return
+    }
+
+    setCreateLoading(true)
+    try {
+      const { data: userData, error: userErr } = await supabase.auth.getUser()
+      if (userErr) throw userErr
+      const user = userData?.user
+      if (!user) throw new Error('Not authenticated')
+
+      const row = {
+        ngo_id: user.id,
+        title: newActivity.title,
+        description: newActivity.description,
+        location: newActivity.location,
+        activity_date: newActivity.date || null,
+        start_time: newActivity.start_time || null,
+        end_time: newActivity.end_time || null,
+        volunteer_capacity: newActivity.expectedVolunteers ? parseInt(newActivity.expectedVolunteers) : null,
+        volunteer_count: 0,
         status: 'upcoming',
-        volunteers: [],
-        image: null
-      };
-      setActivities([...activities, activity]);
+        budget_estimate: newActivity.budget_estimate ?? null,
+        funds_received: 0,
+        pollution_score: null
+      }
+
+      const { data: inserted, error: insertErr } = await supabase
+        .from('ngo_activities')
+        .insert(row)
+        .select()
+        .single()
+
+      if (insertErr) throw insertErr
+
+      const activity = {
+        id: inserted.id,
+        title: inserted.title,
+        description: inserted.description,
+        date: inserted.activity_date,
+        location: inserted.location,
+        expectedVolunteers: inserted.volunteer_capacity ?? 0,
+        registeredVolunteers: inserted.volunteer_count ?? 0,
+        status: computeActivityStatus(inserted.activity_date, inserted.status ?? 'upcoming'),
+        saplings: 0,
+        category: 'Plantation',
+        priority: 'medium',
+        image: null,
+        volunteers: []
+      }
+
+      setActivities(prev => [activity, ...prev])
+      // adjust dashboard if this activity is already completed
+      if (activity.status === 'completed') {
+        adjustActivitiesCompleted(1)
+      }
       setNewActivity({
         title: '',
         description: '',
@@ -157,10 +504,18 @@ const NGODashboard = () => {
         saplings: '',
         category: 'Plantation',
         priority: 'medium'
-      });
-      setShowCreateForm(false);
+      })
+      setActiveSubSection(null)
+      setCreateSuccess('Activity created successfully')
+      // ensure DB counts/statuses are correct after creation
+      reconcileActivityStatuses()
+    } catch (err) {
+      console.error('Error creating activity', err)
+      setCreateError(err?.message || String(err))
+    } finally {
+      setCreateLoading(false)
     }
-  };
+  }
 
   const handleEditActivity = (activity) => {
     setEditingActivity(activity);
@@ -168,33 +523,116 @@ const NGODashboard = () => {
     setActiveSubSection('edit-activity');
   };
 
-  const handleUpdateActivity = () => {
-    setActivities(activities.map(act => 
-      act.id === editingActivity.id ? { ...newActivity, id: editingActivity.id } : act
-    ));
-    setEditingActivity(null);
-    setActiveSubSection(null);
-    setNewActivity({
-      title: '',
-      description: '',
-      date: '',
-      location: '',
-      expectedVolunteers: '',
-      saplings: '',
-      category: 'Plantation',
-      priority: 'medium'
-    });
+  const handleUpdateActivity = async () => {
+    setCreateError(null)
+    setCreateSuccess(null)
+    setUpdateLoading(true)
+    try {
+      if (!editingActivity) throw new Error('No activity selected for edit')
+
+      // Prepare payload for update
+      const payload = {
+        title: newActivity.title || null,
+        description: newActivity.description || null,
+        location: newActivity.location || null,
+        activity_date: newActivity.date || null,
+        start_time: newActivity.start_time || null,
+        end_time: newActivity.end_time || null,
+        volunteer_capacity: newActivity.expectedVolunteers ? parseInt(newActivity.expectedVolunteers) : null,
+        status: computeActivityStatus(newActivity.date, newActivity.status ?? 'upcoming')
+      }
+
+      const { data: updated, error: updateErr } = await supabase
+        .from('ngo_activities')
+        .update(payload)
+        .eq('id', editingActivity.id)
+        .select()
+        .single()
+
+      if (updateErr) throw updateErr
+
+      const mapped = {
+        id: updated.id,
+        title: updated.title,
+        description: updated.description,
+        date: updated.activity_date,
+        location: updated.location,
+        expectedVolunteers: updated.volunteer_capacity ?? 0,
+        registeredVolunteers: updated.volunteer_count ?? 0,
+        status: computeActivityStatus(updated.activity_date, updated.status ?? 'upcoming'),
+        saplings: 0,
+        category: updated.category ?? 'Plantation',
+        priority: 'medium',
+        image: null,
+        volunteers: []
+      }
+
+      setActivities(prev => prev.map(act => act.id === mapped.id ? mapped : act))
+      // adjust dashboard if status changed
+      const prevStatus = editingActivity?.status
+      const newStatus = mapped.status
+      if (prevStatus !== newStatus) {
+        if (prevStatus !== 'completed' && newStatus === 'completed') adjustActivitiesCompleted(1)
+        if (prevStatus === 'completed' && newStatus !== 'completed') adjustActivitiesCompleted(-1)
+      }
+      setEditingActivity(null)
+      setActiveSubSection(null)
+      setNewActivity({
+        title: '',
+        description: '',
+        date: '',
+        location: '',
+        expectedVolunteers: '',
+        saplings: '',
+        category: 'Plantation',
+        priority: 'medium'
+      })
+      setCreateSuccess('Activity updated')
+      // ensure DB counts/statuses are correct after update
+      reconcileActivityStatuses()
+    } catch (err) {
+      console.error('Error updating activity', err)
+      setCreateError(err?.message || String(err))
+    } finally {
+      setUpdateLoading(false)
+    }
   };
 
   const handleDeleteActivity = (id) => {
-    setActivities(activities.filter(act => act.id !== id));
+    // optimistic local delete fallback; actual delete will be attempted against DB
+    (async () => {
+      try {
+        setDeletingIds(prev => new Set(prev).add(id))
+        const { error } = await supabase
+          .from('ngo_activities')
+          .delete()
+          .eq('id', id)
+
+        if (error) throw error
+
+        // find activity to know previous status
+        const prevAct = activities.find(a => a.id === id)
+        // remove from local state
+        setActivities(prev => prev.filter(act => act.id !== id))
+        if (prevAct && prevAct.status === 'completed') {
+          adjustActivitiesCompleted(-1)
+        }
+        // reconcile to ensure DB has exact counts after delete
+        reconcileActivityStatuses()
+      } catch (err) {
+        console.error('Error deleting activity', err)
+        // Optionally show error to user
+      } finally {
+        setDeletingIds(prev => {
+          const copy = new Set(prev)
+          copy.delete(id)
+          return copy
+        })
+      }
+    })()
   };
 
-  const markAsCompleted = (id) => {
-    setActivities(activities.map(act => 
-      act.id === id ? { ...act, status: 'completed' } : act
-    ));
-  };
+  
 
   const filteredActivities = activities.filter(activity => {
     const matchesSearch = activity.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -207,7 +645,7 @@ const NGODashboard = () => {
     <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-all duration-300">
       <div className="flex items-center justify-between">
         <div className={`p-3 rounded-lg ${color}`}>
-          <Icon className="h-6 w-6 text-white" />
+          {Icon && <Icon className="h-6 w-6 text-white" />}
         </div>
         {trend && (
           <div className={`flex items-center text-sm font-medium ${trend === 'up' ? 'text-green-600' : 'text-red-600'}`}>
@@ -263,9 +701,10 @@ const NGODashboard = () => {
                 </button>
                 <button 
                   onClick={() => handleDeleteActivity(activity.id)}
-                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  className={`p-2 ${deletingIds.has(activity.id) ? 'text-gray-400' : 'text-red-600 hover:bg-red-50'} rounded-lg transition-colors`}
+                  disabled={deletingIds.has(activity.id)}
                 >
-                  <Trash2 className="h-4 w-4" />
+                  {deletingIds.has(activity.id) ? 'Deleting…' : <Trash2 className="h-4 w-4" />}
                 </button>
               </div>
             )}
@@ -289,13 +728,28 @@ const NGODashboard = () => {
   );
 
   const renderMainContent = () => {
+    if (loading) {
+      return (
+        <div className="flex items-center justify-center p-12">
+          <div className="text-gray-600">Loading dashboard…</div>
+        </div>
+      )
+    }
+
+    if (error) {
+      return (
+        <div className="p-6">
+          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded">Error loading data: {String(error)}</div>
+        </div>
+      )
+    }
     if (activeTab === 'overview') {
       return (
         <div className="space-y-6">
           {/* Hero Section */}
           <div className="bg-gradient-to-r from-green-600 to-blue-600 rounded-2xl p-8 text-white">
-            <h2 className="text-3xl font-bold mb-2">Welcome back, Green Earth Foundation!</h2>
-            <p className="text-green-100 text-lg mb-4">Making our planet greener, one tree at a time 🌱</p>
+            <h2 className="text-3xl font-bold mb-2">Welcome back, {ngoDetails?.name ?? 'Green Earth Foundation'}!</h2>
+            <p className="text-green-100 text-lg mb-4">{ngoDetails?.description ?? 'Making our planet greener, one tree at a time 🌱'}</p>
           </div>
 
           {/* Stats Grid */}
@@ -303,25 +757,25 @@ const NGODashboard = () => {
             <StatCard 
               icon={TreePine} 
               title="Total Saplings" 
-              value={dashboardStats.totalSaplings.toLocaleString()}
+              value={(dashboardStats.totalSaplings ?? 0).toLocaleString()}
               color="bg-green-600"
             />
             <StatCard 
               icon={DollarSign} 
               title="Donations" 
-              value={`$${dashboardStats.totalDonations.toLocaleString()}`}
+              value={`₹${(dashboardStats.totalDonations ?? 0).toLocaleString()}`}
               color="bg-blue-600"
             />
             <StatCard 
               icon={Users} 
               title="Volunteers" 
-              value={dashboardStats.totalVolunteers.toLocaleString()}
+              value={(dashboardStats.totalVolunteers ?? 0).toLocaleString()}
               color="bg-purple-600"
             />
             <StatCard 
               icon={Award} 
               title="Completed" 
-              value={dashboardStats.completedActivities}
+              value={dashboardStats.completedActivities ?? 0}
               color="bg-orange-600"
             />
           </div>
@@ -408,9 +862,10 @@ const NGODashboard = () => {
             <div className="flex gap-3 mt-8">
               <button 
                 onClick={activeSubSection === 'edit-activity' ? handleUpdateActivity : handleCreateActivity}
-                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                className={`px-6 py-3 ${(activeSubSection === 'edit-activity' ? updateLoading : createLoading) ? 'bg-green-400' : 'bg-green-600 hover:bg-green-700'} text-white rounded-lg transition-colors`}
+                disabled={createLoading || updateLoading}
               >
-                {activeSubSection === 'edit-activity' ? 'Update Activity' : 'Create Activity'}
+                {(activeSubSection === 'edit-activity' ? (updateLoading ? 'Updating…' : 'Update Activity') : (createLoading ? 'Creating…' : 'Create Activity'))}
               </button>
               <button 
                 onClick={() => {
@@ -431,6 +886,10 @@ const NGODashboard = () => {
               >
                 Cancel
               </button>
+            </div>
+            <div className="mt-4">
+              {createError && <div className="text-sm text-red-600">{createError}</div>}
+              {createSuccess && <div className="text-sm text-green-600">{createSuccess}</div>}
             </div>
           </div>
         );
@@ -589,16 +1048,16 @@ const NGODashboard = () => {
                 <TreePine className="h-10 w-10 text-white" />
               </div>
               <div>
-                <h3 className="text-2xl font-bold mb-2">Green Earth Foundation</h3>
-                <p className="text-green-100 mb-2">Environmental Conservation NGO</p>
+                <h3 className="text-2xl font-bold mb-2">{profileForm.name || 'Organization Name'}</h3>
+                <p className="text-green-100 mb-2">{profileForm.sector || 'Environmental Conservation NGO'}</p>
                 <div className="flex items-center gap-4 text-sm">
                   <div className="flex items-center">
                     <Mail className="h-4 w-4 mr-1" />
-                    contact@greenearthfoundation.org
+                    {profileForm.email || 'contact@yourngo.org'}
                   </div>
                   <div className="flex items-center">
                     <Phone className="h-4 w-4 mr-1" />
-                    +1 (555) 123-4567
+                    {profileForm.phone || 'Phone number'}
                   </div>
                 </div>
               </div>
@@ -613,7 +1072,8 @@ const NGODashboard = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Organization Name</label>
                 <input
                   type="text"
-                  defaultValue="Green Earth Foundation"
+                  value={profileForm.name}
+                  onChange={(e) => setProfileForm({...profileForm, name: e.target.value})}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                 />
               </div>
@@ -621,7 +1081,8 @@ const NGODashboard = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Contact Email</label>
                 <input
                   type="email"
-                  defaultValue="contact@greenearthfoundation.org"
+                  value={profileForm.email}
+                  onChange={(e) => setProfileForm({...profileForm, email: e.target.value})}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                 />
               </div>
@@ -629,7 +1090,8 @@ const NGODashboard = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
                 <input
                   type="tel"
-                  defaultValue="+1 (555) 123-4567"
+                  value={profileForm.phone}
+                  onChange={(e) => setProfileForm({...profileForm, phone: e.target.value})}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                 />
               </div>
@@ -637,26 +1099,36 @@ const NGODashboard = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Website</label>
                 <input
                   type="url"
-                  defaultValue="https://greenearthfoundation.org"
+                  value={profileForm.website}
+                  onChange={(e) => setProfileForm({...profileForm, website: e.target.value})}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Mission Statement</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
                 <textarea
                   rows={4}
-                  defaultValue="Dedicated to environmental conservation through community tree planting and awareness programs."
+                  value={profileForm.description}
+                  onChange={(e) => setProfileForm({...profileForm, description: e.target.value})}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                 />
               </div>
             </div>
             <div className="flex gap-3 mt-8">
-              <button className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                Update Profile
+              <button
+                onClick={handleUpdateProfile}
+                disabled={profileLoading}
+                className={`px-6 py-3 ${profileLoading ? 'bg-green-400' : 'bg-green-600 hover:bg-green-700'} text-white rounded-lg transition-colors`}
+              >
+                {profileLoading ? 'Saving…' : 'Update Profile'}
               </button>
               <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
                 Change Password
               </button>
+            </div>
+            <div className="mt-3">
+              {profileError && <div className="text-sm text-red-600">{profileError}</div>}
+              {profileSuccess && <div className="text-sm text-green-600">{profileSuccess}</div>}
             </div>
           </div>
         </div>
@@ -666,120 +1138,7 @@ const NGODashboard = () => {
     return null;
   };
 
-  const getQuickActions = () => {
-    switch (activeTab) {
-      case 'overview':
-        return [
-          {
-            icon: Plus,
-            label: 'Create New Activity',
-            action: () => {
-              setActiveTab('activities');
-              setActiveSubSection('create');
-            },
-            color: 'bg-green-600 hover:bg-green-700'
-          },
-          {
-            icon: PenTool,
-            label: 'Write Blog Post',
-            action: () => {
-              setActiveTab('content');
-              setActiveSubSection('write-blog');
-            },
-            color: 'bg-blue-600 hover:bg-blue-700'
-          },
-          {
-            icon: Users2,
-            label: 'View Volunteers',
-            action: () => setActiveTab('activities'),
-            color: 'bg-purple-600 hover:bg-purple-700'
-          }
-        ];
-      case 'activities':
-        return [
-          {
-            icon: Plus,
-            label: 'Create Activity',
-            action: () => setActiveSubSection('create'),
-            color: 'bg-green-600 hover:bg-green-700'
-          },
-          {
-            icon: Search,
-            label: 'Search Activities',
-            action: () => document.querySelector('input[placeholder="Search activities..."]')?.focus(),
-            color: 'bg-blue-600 hover:bg-blue-700'
-          },
-          {
-            icon: Filter,
-            label: 'Filter by Status',
-            action: () => console.log('Filter'),
-            color: 'bg-purple-600 hover:bg-purple-700'
-          },
-          {
-            icon: Calendar,
-            label: 'Calendar View',
-            action: () => console.log('Calendar View'),
-            color: 'bg-orange-600 hover:bg-orange-700'
-          }
-        ];
-      case 'content':
-        return [
-          {
-            icon: PenTool,
-            label: 'Write New Post',
-            action: () => setActiveSubSection('write-blog'),
-            color: 'bg-blue-600 hover:bg-blue-700'
-          },
-          {
-            icon: FileText,
-            label: 'View Drafts',
-            action: () => console.log('View Drafts'),
-            color: 'bg-green-600 hover:bg-green-700'
-          },
-          {
-            icon: Eye,
-            label: 'Analytics',
-            action: () => console.log('Analytics'),
-            color: 'bg-purple-600 hover:bg-purple-700'
-          },
-          {
-            icon: Share,
-            label: 'Share Content',
-            action: () => console.log('Share'),
-            color: 'bg-orange-600 hover:bg-orange-700'
-          }
-        ];
-      case 'profile':
-        return [
-          {
-            icon: Save,
-            label: 'Save Changes',
-            action: () => console.log('Save Profile'),
-            color: 'bg-green-600 hover:bg-green-700'
-          },
-          {
-            icon: Camera,
-            label: 'Upload Logo',
-            action: () => console.log('Upload Logo'),
-            color: 'bg-blue-600 hover:bg-blue-700'
-          },
-          {
-            icon: Settings,
-            label: 'Account Settings',
-            action: () => console.log('Settings'),
-            color: 'bg-purple-600 hover:bg-purple-700'
-          },
-          {
-            icon: Globe,
-            label: 'Public Profile',
-            action: () => console.log('Public Profile'),
-            color: 'bg-orange-600 hover:bg-orange-700'
-          }
-        ];
-      default:
-        return [];
-    }
-  };
+  
 
   const menuItems = [
     { id: 'overview', label: 'Overview', icon: Home },
@@ -788,7 +1147,7 @@ const NGODashboard = () => {
     { id: 'profile', label: 'Profile', icon: Settings }
   ];
 
-  const quickActions = getQuickActions();
+  
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -906,6 +1265,14 @@ const NGODashboard = () => {
                 <button className="relative p-2 text-gray-600 hover:text-gray-900 transition-colors">
                   <Bell className="h-5 w-5" />
                   <span className="absolute -top-1 -right-1 h-3 w-3 bg-red-500 rounded-full text-xs"></span>
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="p-2 text-gray-600 hover:text-gray-900 transition-colors"
+                  disabled={loggingOut}
+                  title={loggingOut ? 'Signing out…' : 'Sign out'}
+                >
+                  <LogOut className="h-5 w-5" />
                 </button>
               </div>
             </div>

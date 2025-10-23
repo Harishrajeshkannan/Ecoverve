@@ -1,110 +1,321 @@
 import React, { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabaseClient'
 import { 
-  User, TreePine, DollarSign, Calendar, Trophy, Activity, 
+  User, TreePine, IndianRupee, Calendar, Trophy, Activity, 
   Heart, Edit, Settings, LogOut, Bell, MapPin, Users,
   BookOpen, MessageCircle, ThumbsUp, Gift, Award,
   PlusCircle, Filter, Search, ChevronRight, Star,
   Home, BarChart, FileText, TrendingUp, Eye, Share,
-  Camera, Save, Globe, Mail, Phone, Target, Zap,
+  Camera, Save, Globe, Mail, Phone, Zap,
   CheckCircle, Clock, Edit3, Trash2, Plus
 } from 'lucide-react';
 
-const UserDashboard = () => {
+const UserDashboard = ({ navigate }) => {
   const [activeTab, setActiveTab] = useState('overview');
   const [activeSubSection, setActiveSubSection] = useState(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const [_userDetails, setUserDetails] = useState(null)
+  const [_userDashboard, setUserDashboard] = useState(null)
+  const [userActivities, setUserActivities] = useState([])
+  const [allActivities, setAllActivities] = useState([])
+  const [joinLoadingIds, setJoinLoadingIds] = useState(new Set())
+  const [userDonations, setUserDonations] = useState([])
+  const [searchJoinTerm, setSearchJoinTerm] = useState('')
+
+  const handleJoinActivity = async (activityId) => {
+    try {
+      setJoinLoadingIds(prev => new Set(prev).add(activityId))
+      const { data: userDataResp, error: userErr } = await supabase.auth.getUser()
+      if (userErr) throw userErr
+      const user = userDataResp?.user
+      if (!user) throw new Error('Not authenticated')
+
+      // prevent duplicate joins
+      const { data: existing, error: exErr } = await supabase
+        .from('user_activities')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('activity_id', activityId)
+        .maybeSingle()
+
+      if (exErr) throw exErr
+      if (existing) {
+        // already joined; update local state
+        setUserActivities(prev => prev.map(a => a.id === activityId ? ({ ...a, participated: true }) : a))
+        return
+      }
+
+      const payload = {
+        user_id: user.id,
+        activity_id: activityId,
+        participated: false,
+        donation: 0
+      }
+
+      const { error } = await supabase
+        .from('user_activities')
+        .insert(payload)
+
+      if (error) throw error
+
+      // mark as joined locally in allActivities
+      setAllActivities(prev => prev.map(a => a.id === activityId ? ({ ...a, participated: true }) : a))
+
+      // fetch the activity row and prepend to userActivities if not already present
+      const { data: actRows, error: actErr } = await supabase
+        .from('ngo_activities')
+        .select('*')
+        .eq('id', activityId)
+        .single()
+
+      if (!actErr && actRows) {
+        const a = actRows
+        const mapped = {
+          id: a.id,
+          name: a.title ?? 'Activity',
+          date: a.activity_date,
+          status: a.status ?? 'upcoming',
+          location: a.location,
+          description: a.description,
+          volunteers: a.volunteer_capacity ?? 0,
+          registeredVolunteers: a.volunteer_count ?? 0,
+          organizer: null,
+          points: 0,
+          donation: 0,
+          participated: true
+        }
+
+        setUserActivities(prev => {
+          if (prev.some(x => x.id === mapped.id)) return prev.map(x => x.id === mapped.id ? mapped : x)
+          return [mapped, ...prev]
+        })
+      }
+    } catch (err) {
+      console.error('Error joining activity', err)
+    } finally {
+      setJoinLoadingIds(prev => {
+        const copy = new Set(prev)
+        copy.delete(activityId)
+        return copy
+      })
+    }
+  }
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  const handleLogout = async () => {
+    try {
+      setLoggingOut(true)
+      await supabase.auth.signOut()
+      // onAuthStateChange in App.jsx will update session and show AuthPage
+    } catch (error) {
+      console.error('Logout error', error)
+    } finally {
+      setLoggingOut(false)
+    }
+  }
   
   // Mock user data
-  const userData = {
-    name: "Sarah Johnson",
-    role: "Eco Warrior",
-    level: "Champion",
-    avatar: "/api/placeholder/80/80",
+  const [userData, setUserData] = useState({
+    name: 'Community Member',
+    role: 'Member',
+    level: '',
+    avatar: null,
     stats: {
-      treesPlanted: 127,
-      totalDonations: 2450,
-      eventsJoined: 15,
-      impactScore: 3825,
-      ecoPoints: 1250,
-      rank: 3,
-      nextLevelPoints: 350
+      totalDonations: 0,
+      eventsJoined: 0,
+      impactScore: 0,
+      ecoPoints: 0,
+      rank: 0,
+      nextLevelPoints: 0
     },
     contact: {
-      email: "sarah.johnson@email.com",
-      phone: "+1 (555) 987-6543",
-      location: "Chennai, Tamil Nadu"
+      email: '',
+      phone: '',
+      location: ''
     }
-  };
+  })
 
-  const [activities, setActivities] = useState([
-    {
-      id: 1,
-      name: "Beach Cleanup Drive",
-      date: "2024-09-15",
-      status: "upcoming",
-      location: "Marina Beach",
-      description: "Join us for a morning of cleaning up Marina Beach and protecting marine life.",
-      volunteers: 25,
-      registeredVolunteers: 18,
-      organizer: "Ocean Clean Initiative",
-      points: 50
-    },
-    {
-      id: 2,
-      name: "Tree Plantation",
-      date: "2024-09-08",
-      status: "completed",
-      location: "Central Park",
-      description: "Community tree planting event to increase green cover in the city.",
-      volunteers: 30,
-      registeredVolunteers: 32,
-      organizer: "Green Earth Foundation",
-      points: 75
-    },
-    {
-      id: 3,
-      name: "Plastic Recycling Workshop",
-      date: "2024-09-20",
-      status: "upcoming",
-      location: "Community Center",
-      description: "Learn innovative ways to recycle plastic waste at home.",
-      volunteers: 15,
-      registeredVolunteers: 12,
-      organizer: "EcoTech Solutions",
-      points: 30
+  // activities are loaded from DB into `userActivities`
+
+
+  // donation history is constructed from user_activities donations -> userDonations
+
+  useEffect(() => {
+    let mounted = true
+    const load = async () => {
+      setLoading(true)
+      try {
+        const { data: userDataResp, error: userErr } = await supabase.auth.getUser()
+        if (userErr) throw userErr
+        const user = userDataResp?.user
+        if (!user) {
+          setError('No authenticated user')
+          setLoading(false)
+          return
+        }
+
+        // Fetch user_details
+        const { data: uDetails, error: uDetErr } = await supabase
+          .from('user_details')
+          .select('*')
+          .eq('id', user.id)
+          .single()
+
+        if (uDetErr && uDetErr.code !== 'PGRST116') throw uDetErr
+
+        // Fetch user_dashboard
+        const { data: uDash, error: uDashErr } = await supabase
+          .from('user_dashboard')
+          .select('*')
+          .eq('user_id', user.id)
+          .maybeSingle()
+
+        if (uDashErr) throw uDashErr
+
+        // Fetch user_activities (join to get activity details)
+        const { data: ua, error: uaErr } = await supabase
+          .from('user_activities')
+          .select('*, ngo_activities(*)')
+          .eq('user_id', user.id)
+          .order('activity_id', { ascending: false })
+
+        if (uaErr) throw uaErr
+
+        // Map activities
+        const mappedActs = (ua ?? []).map(row => {
+          const a = row.ngo_activities || {}
+          return {
+            id: row.activity_id,
+            name: a.title ?? 'Activity',
+            date: a.activity_date,
+            status: a.status ?? (row.participated ? 'completed' : 'upcoming'),
+            location: a.location,
+            description: a.description,
+            volunteers: a.volunteer_capacity ?? 0,
+            registeredVolunteers: a.volunteer_count ?? 0,
+            organizer: null,
+            points: 0,
+            donation: row.donation ?? 0,
+            participated: row.participated ?? false
+          }
+        })
+
+        // Fetch donation history from user_activities where donation > 0
+        const donationsList = mappedActs.filter(a => a.donation && a.donation > 0).map((a, idx) => ({
+          id: idx + 1,
+          amount: a.donation,
+          ngo: a.name,
+          date: a.date,
+          impact: '',
+          status: 'completed',
+          project: ''
+        }))
+
+        if (mounted) {
+          setUserDetails(uDetails ?? null)
+          setUserDashboard(uDash ?? null)
+          setUserActivities(mappedActs)
+          // Fetch all activities available to join
+          const { data: allActs, error: allErr } = await supabase
+            .from('ngo_activities')
+            .select('*')
+            .order('activity_date', { ascending: false })
+
+          if (allErr) throw allErr
+
+          const mappedAll = (allActs ?? []).map(a => ({
+            id: a.id,
+            name: a.title ?? 'Activity',
+            date: a.activity_date,
+            status: a.status ?? 'upcoming',
+            location: a.location,
+            description: a.description,
+            volunteers: a.volunteer_capacity ?? 0,
+            registeredVolunteers: a.volunteer_count ?? 0,
+            organizer: null,
+            points: 0
+          }))
+          setAllActivities(mappedAll)
+          console.debug('Fetched allActivities count:', (mappedAll ?? []).length)
+          setUserDonations(donationsList)
+
+          // Update userData visible fields
+          setUserData(prev => ({
+            ...prev,
+            name: uDetails?.first_name ? `${uDetails.first_name} ${uDetails.last_name ?? ''}`.trim() : prev.name,
+            contact: {
+              email: uDetails?.email ?? prev.contact.email,
+              phone: uDetails?.contact_number ?? prev.contact.phone,
+              location: uDetails?.address ?? prev.contact.location
+            },
+            stats: {
+              treesPlanted: uDash?.trees_planted ?? prev.stats.treesPlanted,
+              totalDonations: uDash?.total_donation ?? prev.stats.totalDonations,
+              eventsJoined: uDash?.events_joined ?? prev.stats.eventsJoined,
+              impactScore: uDash?.impact_score ?? prev.stats.impactScore,
+              ecoPoints: prev.stats.ecoPoints,
+              rank: prev.stats.rank,
+              nextLevelPoints: prev.stats.nextLevelPoints
+            }
+          }))
+        }
+
+        setError(null)
+      } catch (err) {
+        console.error('Error loading user dashboard data', err)
+        if (mounted) setError(err.message || String(err))
+      } finally {
+        if (mounted) setLoading(false)
+      }
     }
-  ]);
 
-  const [donations, setDonations] = useState([
-    {
-      id: 1,
-      amount: 500,
-      ngo: "Green Earth Foundation",
-      date: "2024-08-15",
-      impact: "10 trees planted",
-      status: "completed",
-      project: "Urban Reforestation"
-    },
-    {
-      id: 2,
-      amount: 250,
-      ngo: "Ocean Clean Initiative",
-      date: "2024-07-22",
-      impact: "2 hours of beach cleanup",
-      status: "completed",
-      project: "Marine Conservation"
-    },
-    {
-      id: 3,
-      amount: 100,
-      ngo: "Wildlife Protection Trust",
-      date: "2024-06-10",
-      impact: "Fed 5 rescued animals",
-      status: "completed",
-      project: "Wildlife Rescue"
+    load()
+    return () => { mounted = false }
+  }, [])
+
+  // Fetch all NGO activities independently so All Activities always shows table contents
+  useEffect(() => {
+    let mounted = true
+    const fetchAll = async () => {
+      try {
+        const { data: allActs, error } = await supabase
+          .from('ngo_activities')
+          .select('*')
+          .order('activity_date', { ascending: false })
+
+        if (error) {
+          console.error('Error fetching all activities', error)
+          return
+        }
+
+        if (mounted) {
+          const mappedAll = (allActs ?? []).map(a => ({
+            id: a.id,
+            name: a.title ?? 'Activity',
+            date: a.activity_date,
+            status: a.status ?? 'upcoming',
+            location: a.location,
+            description: a.description,
+            volunteers: a.volunteer_capacity ?? 0,
+            registeredVolunteers: a.volunteer_count ?? 0,
+            organizer: null,
+            points: 0
+          }))
+          setAllActivities(mappedAll)
+          console.debug('fetched all activities', mappedAll.length)
+        }
+      } catch (err) {
+        console.error('Error in fetchAll activities', err)
+      }
     }
-  ]);
 
-  const [blogs, setBLogs] = useState([
+    fetchAll()
+    return () => { mounted = false }
+  }, [])
+
+  const blogs = [
     {
       id: 1,
       title: "10 Easy Ways to Reduce Your Carbon Footprint",
@@ -127,7 +338,7 @@ const UserDashboard = () => {
       status: "draft",
       content: "Last weekend's river cleanup was an eye-opening experience. Here's what I learned about water pollution in our city..."
     }
-  ]);
+  ];
 
   const leaderboard = [
     { rank: 1, name: "Alex Green", points: 4250, avatar: "/api/placeholder/40/40", change: "+50" },
@@ -137,37 +348,11 @@ const UserDashboard = () => {
     { rank: 5, name: "Lisa Wang", points: 3400, avatar: "/api/placeholder/40/40", change: "+30" }
   ];
 
-  const recommendations = [
-    {
-      type: "activity",
-      title: "Weekend Tree Planting",
-      description: "Join a tree planting drive near your location",
-      location: "Anna Nagar Park",
-      date: "2024-09-21",
-      points: 100,
-      difficulty: "Easy"
-    },
-    {
-      type: "ngo",
-      title: "Chennai Green Initiative",
-      description: "Based on your donation history",
-      focus: "Urban Gardening",
-      rating: 4.8
-    },
-    {
-      type: "blog",
-      title: "Sustainable Living Tips",
-      author: "Eco Expert",
-      readTime: "5 min read",
-      topic: "Lifestyle"
-    }
-  ];
-
   const StatCard = ({ icon: Icon, title, value, color, subtitle, trend, trendValue }) => (
     <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-all duration-300">
       <div className="flex items-center justify-between">
         <div className={`p-3 rounded-lg ${color}`}>
-          <Icon className="h-6 w-6 text-white" />
+          {Icon && <Icon className="h-6 w-6 text-white" />}
         </div>
         {trend && (
           <div className={`flex items-center text-sm font-medium ${trend === 'up' ? 'text-green-600' : 'text-red-600'}`}>
@@ -184,7 +369,7 @@ const UserDashboard = () => {
     </div>
   );
 
-  const ActivityCard = ({ activity, isCompact = false }) => (
+  const ActivityCard = ({ activity, isCompact = false, showJoin = false, onJoin = null }) => (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-300">
       <div className="p-6">
         <div className="flex justify-between items-start mb-4">
@@ -218,6 +403,15 @@ const UserDashboard = () => {
             }`}>
               {activity.status === 'completed' ? 'Completed' : 'Upcoming'}
             </span>
+            {showJoin && (
+              <button 
+                onClick={() => onJoin && onJoin(activity.id)}
+                className={`p-2 ${joinLoadingIds.has(activity.id) ? 'text-gray-400' : 'text-green-600 hover:bg-green-50'} rounded-lg transition-colors`}
+                disabled={joinLoadingIds.has(activity.id)}
+              >
+                {activity.participated ? 'Joined' : 'Join'}
+              </button>
+            )}
           </div>
         </div>
         
@@ -234,7 +428,65 @@ const UserDashboard = () => {
     </div>
   );
 
+  // Separate card used in Join Activities view to show organizer, description and join CTA clearly
+  const JoinActivityCard = ({ activity, onJoin, loading }) => (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-300">
+      <div className="p-6">
+        <div className="flex justify-between items-start mb-4">
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">{activity.name}</h3>
+            <p className="text-gray-600 text-sm mb-3">{activity.description}</p>
+            <div className="flex items-center gap-4 text-sm text-gray-600">
+              <div className="flex items-center">
+                <Calendar className="h-4 w-4 mr-1" />
+                {new Date(activity.date).toLocaleDateString()}
+              </div>
+              <div className="flex items-center">
+                <MapPin className="h-4 w-4 mr-1" />
+                {activity.location}
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-col items-end ml-4">
+            <span className={`px-3 py-1 rounded-full text-xs font-medium ${activity.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
+              {activity.status === 'completed' ? 'Completed' : 'Upcoming'}
+            </span>
+            <button
+              onClick={() => onJoin && onJoin(activity.id)}
+              disabled={loading}
+              className={`mt-3 px-4 py-2 rounded-lg ${loading ? 'bg-gray-200 text-gray-500' : 'bg-green-600 text-white hover:bg-green-700'}`}
+            >
+              {activity.participated ? 'Joined' : 'Join'}
+            </button>
+          </div>
+        </div>
+        <div className="flex justify-between items-center text-sm">
+          <div className="flex items-center text-gray-600">
+            <Users className="h-4 w-4 mr-1" />
+            {activity.registeredVolunteers}/{activity.volunteers} volunteers
+          </div>
+          <p className="text-gray-600">by {activity.organizer ?? 'Organizer'}</p>
+        </div>
+      </div>
+    </div>
+  )
+
   const renderMainContent = () => {
+    if (loading) {
+      return (
+        <div className="flex items-center justify-center p-12">
+          <div className="text-gray-600">Loading dashboard…</div>
+        </div>
+      )
+    }
+
+    if (error) {
+      return (
+        <div className="p-6">
+          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded">Error loading data: {String(error)}</div>
+        </div>
+      )
+    }
     if (activeTab === 'overview') {
       return (
         <div className="space-y-6">
@@ -262,17 +514,11 @@ const UserDashboard = () => {
           </div>
 
           {/* Stats Grid */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-6">
             <StatCard 
-              icon={TreePine} 
-              title="Trees Planted" 
-              value={userData.stats.treesPlanted}
-              color="bg-green-600"
-            />
-            <StatCard 
-              icon={DollarSign} 
+              icon={IndianRupee} 
               title="Total Donations" 
-              value={`$${userData.stats.totalDonations}`}
+              value={`${userData.stats.totalDonations}`}
               color="bg-blue-600"
             />
             <StatCard 
@@ -303,7 +549,7 @@ const UserDashboard = () => {
                 </button>
               </div>
               <div className="space-y-4">
-                {activities.slice(0, 2).map(activity => (
+                {userActivities.slice(0, 2).map(activity => (
                   <ActivityCard key={activity.id} activity={activity} isCompact={true} />
                 ))}
               </div>
@@ -343,13 +589,19 @@ const UserDashboard = () => {
     }
 
     if (activeTab === 'activities') {
+      // local subview: 'my' or 'join'
+      const [activitiesView, setActivitiesView] = [activeSubSection === 'join' ? 'join' : 'my', (v) => setActiveSubSection(v === 'my' ? null : 'join')]
       return (
         <div className="space-y-6">
           {/* Header */}
           <div className="flex justify-between items-center">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">My Activities</h2>
-              <p className="text-gray-600">Track your environmental activities and participation</p>
+              <h2 className="text-2xl font-bold text-gray-900">{activitiesView === 'my' ? 'My Activities' : 'Join Activities'}</h2>
+              <p className="text-gray-600">{activitiesView === 'my' ? 'Track your environmental activities and participation' : 'Browse activities listed by NGOs and join'}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button onClick={() => setActivitiesView('my')} className={`px-3 py-2 rounded ${activitiesView === 'my' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>My Activities</button>
+              <button onClick={() => setActivitiesView('join')} className={`px-3 py-2 rounded ${activitiesView === 'join' ? 'bg-green-600 text-white' : 'bg-gray-100'}`}>Join Activities</button>
             </div>
           </div>
 
@@ -357,30 +609,49 @@ const UserDashboard = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white rounded-xl shadow-sm p-6 text-center">
               <Calendar className="h-8 w-8 text-blue-600 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-blue-600">{activities.filter(a => a.status === 'upcoming').length}</p>
+              <p className="text-2xl font-bold text-blue-600">{userActivities.filter(a => a.status === 'upcoming').length}</p>
               <p className="text-sm text-gray-600">Upcoming Events</p>
             </div>
             <div className="bg-white rounded-xl shadow-sm p-6 text-center">
               <CheckCircle className="h-8 w-8 text-green-600 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-green-600">{activities.filter(a => a.status === 'completed').length}</p>
+              <p className="text-2xl font-bold text-green-600">{userActivities.filter(a => a.status === 'completed').length}</p>
               <p className="text-sm text-gray-600">Completed</p>
             </div>
             <div className="bg-white rounded-xl shadow-sm p-6 text-center">
               <Star className="h-8 w-8 text-orange-600 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-orange-600">{activities.reduce((sum, a) => sum + (a.status === 'completed' ? a.points : 0), 0)}</p>
+              <p className="text-2xl font-bold text-orange-600">{userActivities.reduce((sum, a) => sum + (a.status === 'completed' ? a.points : 0), 0)}</p>
               <p className="text-sm text-gray-600">Points Earned</p>
             </div>
           </div>
 
           {/* Activities List */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">All Activities</h3>
-            <div className="space-y-4">
-              {activities.map(activity => (
-                <ActivityCard key={activity.id} activity={activity} />
-              ))}
+          {activitiesView === 'my' ? (
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">All Activities</h3>
+              <div className="space-y-4">
+                {userActivities.slice(0, 50).map(activity => (
+                  <ActivityCard key={activity.id} activity={activity} />
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">All Activities</h3>
+              <div className="flex gap-3 mb-4">
+                <input type="text" placeholder="Search activities..." value={searchJoinTerm} onChange={e => setSearchJoinTerm(e.target.value)} className="px-3 py-2 border rounded w-full" />
+              </div>
+              <div className="space-y-4">
+                {allActivities.filter(a => {
+                  const matchesSearch = a.name.toLowerCase().includes(searchJoinTerm.toLowerCase()) || (a.location || '').toLowerCase().includes(searchJoinTerm.toLowerCase())
+                  // show only upcoming
+                  const isUpcoming = a.status === 'upcoming' || !a.status
+                  return matchesSearch && isUpcoming
+                }).map(activity => (
+                  <JoinActivityCard key={activity.id} activity={activity} onJoin={handleJoinActivity} loading={joinLoadingIds.has(activity.id)} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -393,28 +664,18 @@ const UserDashboard = () => {
               <h2 className="text-2xl font-bold text-gray-900">Donations & Contributions</h2>
               <p className="text-gray-600">Your contribution to environmental causes</p>
             </div>
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center">
+            <button onClick={() => navigate?.('donate')} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center">
               <Heart className="h-4 w-4 mr-2" />
               Donate Now
             </button>
           </div>
 
           {/* Donation Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white rounded-xl shadow-sm p-6 text-center">
-              <DollarSign className="h-8 w-8 text-green-600 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-green-600">${userData.stats.totalDonations}</p>
+          <div className="flex justify-center mb-6">
+            <div className="bg-white rounded-xl shadow-sm p-6 text-center w-full md:w-2/3 lg:w-1/2">
+              <IndianRupee className="h-8 w-8 text-green-600 mx-auto mb-2" />
+              <p className="text-3xl md:text-4xl font-bold text-green-600">₹{userData.stats.totalDonations}</p>
               <p className="text-sm text-gray-600">Total Donated</p>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm p-6 text-center">
-              <Users className="h-8 w-8 text-blue-600 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-blue-600">{donations.length}</p>
-              <p className="text-sm text-gray-600">NGOs Supported</p>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm p-6 text-center">
-              <Target className="h-8 w-8 text-purple-600 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-purple-600">12</p>
-              <p className="text-sm text-gray-600">Projects Funded</p>
             </div>
           </div>
 
@@ -422,12 +683,12 @@ const UserDashboard = () => {
           <div className="bg-white rounded-xl shadow-sm p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Donation History</h3>
             <div className="space-y-4">
-              {donations.map(donation => (
+              {userDonations.map(donation => (
                 <div key={donation.id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
                       <div className="flex items-center justify-between mb-2">
-                        <h4 className="font-medium text-gray-900">${donation.amount} to {donation.ngo}</h4>
+                        <h4 className="font-medium text-gray-900">₹{donation.amount} to {donation.ngo}</h4>
                         <span className="text-sm text-gray-500">{new Date(donation.date).toLocaleDateString()}</span>
                       </div>
                       <p className="text-sm text-gray-600 mb-1">Project: {donation.project}</p>
@@ -701,7 +962,7 @@ const UserDashboard = () => {
   const menuItems = [
     { id: 'overview', label: 'Overview', icon: Home },
     { id: 'activities', label: 'My Activities', icon: Calendar },
-    { id: 'donations', label: 'Donations', icon: DollarSign },
+  { id: 'donations', label: 'Donations', icon: IndianRupee },
     { id: 'community', label: 'Community', icon: Users },
     { id: 'profile', label: 'Profile', icon: User }
   ];
@@ -784,26 +1045,6 @@ const UserDashboard = () => {
           </div>
         </div>
 
-        {/* Recommendations */}
-        <div className="px-4 mt-6">
-          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Recommended For You</h3>
-            <div className="space-y-3">
-              {recommendations.slice(0, 2).map((rec, index) => (
-                <div key={index} className="p-3 border border-green-200 rounded-lg bg-green-50">
-                  <h4 className="font-medium text-green-800 text-sm mb-1">{rec.title}</h4>
-                  <p className="text-xs text-green-700">{rec.description}</p>
-                  {rec.location && (
-                    <div className="flex items-center text-xs text-green-600 mt-1">
-                      <MapPin className="h-3 w-3 mr-1" />
-                      {rec.location}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
 
         {/* User Profile Section */}
         <div className="mt-auto p-4 border-t border-gray-200">
@@ -850,7 +1091,12 @@ const UserDashboard = () => {
                 <button className="p-2 text-gray-600 hover:text-gray-900 transition-colors">
                   <Settings className="h-5 w-5" />
                 </button>
-                <button className="p-2 text-gray-600 hover:text-gray-900 transition-colors">
+                <button
+                  onClick={handleLogout}
+                  className="p-2 text-gray-600 hover:text-gray-900 transition-colors"
+                  disabled={loggingOut}
+                  title={loggingOut ? 'Signing out…' : 'Sign out'}
+                >
                   <LogOut className="h-5 w-5" />
                 </button>
               </div>
