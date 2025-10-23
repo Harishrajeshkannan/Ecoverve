@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient'
 import { 
   TreePine, 
-  DollarSign, 
+  IndianRupee, 
   Users, 
   Activity, 
   Plus, 
@@ -761,7 +761,7 @@ const NGODashboard = () => {
               color="bg-green-600"
             />
             <StatCard 
-              icon={DollarSign} 
+              icon={IndianRupee} 
               title="Donations" 
               value={`₹${(dashboardStats.totalDonations ?? 0).toLocaleString()}`}
               color="bg-blue-600"

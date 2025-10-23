@@ -137,6 +137,19 @@ const UserDashboard = ({ navigate }) => {
     }
   })
 
+  // Profile form state
+  const [profileForm, setProfileForm] = useState({
+    first_name: '',
+    last_name: '',
+    email: '',
+    contact_number: '',
+    address: '',
+    bio: '',
+    profile_photo_url: ''
+  })
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileMessage, setProfileMessage] = useState(null)
+
   // activities are loaded from DB into `userActivities`
 
 
@@ -241,6 +254,17 @@ const UserDashboard = ({ navigate }) => {
           console.debug('Fetched allActivities count:', (mappedAll ?? []).length)
           setUserDonations(donationsList)
 
+          // initialize profile form from user details
+          setProfileForm({
+            first_name: uDetails?.first_name ?? '',
+            last_name: uDetails?.last_name ?? '',
+            email: uDetails?.email ?? '',
+            contact_number: uDetails?.contact_number ?? '',
+            address: uDetails?.address ?? '',
+            bio: uDetails?.bio ?? '',
+            profile_photo_url: uDetails?.profile_photo_url ?? ''
+          })
+
           // Update userData visible fields
           setUserData(prev => ({
             ...prev,
@@ -314,6 +338,48 @@ const UserDashboard = ({ navigate }) => {
     fetchAll()
     return () => { mounted = false }
   }, [])
+
+  const handleUpdateProfile = async () => {
+    try {
+      setProfileMessage(null)
+      setProfileLoading(true)
+      const { data: userDataResp, error: userErr } = await supabase.auth.getUser()
+      if (userErr) throw userErr
+      const user = userDataResp?.user
+      if (!user) throw new Error('Not authenticated')
+
+      const payload = {
+        id: user.id,
+        first_name: profileForm.first_name || null,
+        last_name: profileForm.last_name || null,
+        email: profileForm.email || null,
+        contact_number: profileForm.contact_number || null,
+        address: profileForm.address || null,
+        bio: profileForm.bio || null,
+        profile_photo_url: profileForm.profile_photo_url || null
+      }
+
+      const { error } = await supabase
+        .from('user_details')
+        .upsert(payload, { returning: 'minimal' })
+
+      if (error) throw error
+
+      setProfileMessage('Profile updated')
+      // update local user details state
+      setUserDetails(prev => ({ ...(prev ?? {}), ...payload }))
+      setUserData(prev => ({
+        ...prev,
+        name: `${profileForm.first_name} ${profileForm.last_name}`.trim(),
+        contact: { ...prev.contact, email: profileForm.email, phone: profileForm.contact_number, location: profileForm.address }
+      }))
+    } catch (err) {
+      console.error('Error updating profile', err)
+      setProfileMessage(err.message || String(err))
+    } finally {
+      setProfileLoading(false)
+    }
+  }
 
   const blogs = [
     {
@@ -879,7 +945,11 @@ const UserDashboard = ({ navigate }) => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
                 <input
                   type="text"
-                  defaultValue={userData.name}
+                  value={`${profileForm.first_name} ${profileForm.last_name}`.trim()}
+                  onChange={(e) => {
+                    const parts = e.target.value.split(' ')
+                    setProfileForm(prev => ({ ...prev, first_name: parts[0] ?? '', last_name: parts.slice(1).join(' ') ?? '' }))
+                  }}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                 />
               </div>
@@ -887,7 +957,8 @@ const UserDashboard = ({ navigate }) => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
                 <input
                   type="email"
-                  defaultValue={userData.contact.email}
+                  value={profileForm.email}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, email: e.target.value }))}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                 />
               </div>
@@ -895,7 +966,8 @@ const UserDashboard = ({ navigate }) => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number</label>
                 <input
                   type="tel"
-                  defaultValue={userData.contact.phone}
+                  value={profileForm.contact_number}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, contact_number: e.target.value }))}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                 />
               </div>
@@ -903,7 +975,8 @@ const UserDashboard = ({ navigate }) => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Location</label>
                 <input
                   type="text"
-                  defaultValue={userData.contact.location}
+                  value={profileForm.address}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, address: e.target.value }))}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                 />
               </div>
@@ -911,19 +984,21 @@ const UserDashboard = ({ navigate }) => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Bio</label>
                 <textarea
                   rows={4}
-                  defaultValue="Passionate about environmental conservation and sustainable living. Love participating in community cleanup drives and tree planting events."
+                  value={profileForm.bio}
+                  onChange={(e) => setProfileForm(prev => ({ ...prev, bio: e.target.value }))}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                 />
               </div>
             </div>
             <div className="flex gap-3 mt-8">
-              <button className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                Update Profile
+              <button onClick={handleUpdateProfile} className={`px-6 py-3 ${profileLoading ? 'bg-green-400' : 'bg-green-600 hover:bg-green-700'} text-white rounded-lg transition-colors`} disabled={profileLoading}>
+                {profileLoading ? 'Saving…' : 'Update Profile'}
               </button>
               <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
                 Change Password
               </button>
             </div>
+            {profileMessage && <div className="mt-3 text-sm text-gray-700">{profileMessage}</div>}
           </div>
 
           {/* Achievements */}

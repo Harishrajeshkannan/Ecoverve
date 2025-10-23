@@ -25,9 +25,16 @@ function App() {
   // Determine role from session metadata (set during signUp in AuthPage)
   const role = session?.user?.user_metadata?.role || session?.user?.role || null
 
-  if (!session) return <AuthPage />
-
   const navigate = (to) => setRoute(to)
+
+  // When not authenticated, show LandingPage by default.
+  // Only show AuthPage when the user explicitly navigates to the login route.
+  if (!session) {
+    if (route === 'login') return <AuthPage navigate={navigate} />
+    if (route === 'signup') return <AuthPage navigate={navigate} initialIsLogin={false} initialIsNGO={false} />
+    if (route === 'signup-ngo') return <AuthPage navigate={navigate} initialIsLogin={false} initialIsNGO={true} />
+    return <LandingPage navigate={navigate} />
+  }
 
   // simple routing: donate page is top-level; otherwise render dashboards
   if (route === 'donate') return <DonationPage navigate={navigate} />

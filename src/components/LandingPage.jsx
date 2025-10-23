@@ -36,6 +36,18 @@ export default function LandingPage({ navigate }){
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  const scrollToSection = (id) => {
+    try {
+      const el = document.getElementById(id)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        setMobileMenuOpen(false)
+      }
+    } catch {
+      // ignore in SSR / tests
+    }
+  }
+
 
   useEffect(() => {
     const duration = 2000;
@@ -118,7 +130,7 @@ export default function LandingPage({ navigate }){
   return (
     <div className="min-h-screen bg-white overflow-x-hidden">
       <header className="bg-white shadow-lg">
-      <nav aria-label="Global" className="mx-auto flex max-w-7xl items-center justify-between p-6 lg:px-8">
+  <nav aria-label="Global" className="flex w-full items-center justify-between p-6 lg:px-8">
         {/* Logo */}
         <div className="flex lg:flex-1">
           <a href="#" className="-m-1.5 p-1.5 flex items-center space-x-3">
@@ -143,30 +155,30 @@ export default function LandingPage({ navigate }){
 
         {/* Desktop Navigation */}
         <div className="hidden lg:flex lg:gap-x-12">
-          <a href="#" className="text-sm font-semibold leading-6 text-gray-900 hover:text-green-600 transition-colors duration-300">
+          <button onClick={() => scrollToSection('home')} className="text-sm font-semibold leading-6 text-gray-900 hover:text-green-600 transition-colors duration-300">
             Home
-          </a>
-          <a href="#" className="text-sm font-semibold leading-6 text-gray-900 hover:text-green-600 transition-colors duration-300">
+          </button>
+          <button onClick={() => scrollToSection('activities')} className="text-sm font-semibold leading-6 text-gray-900 hover:text-green-600 transition-colors duration-300">
             Activities
-          </a>
-          <a href="#" className="text-sm font-semibold leading-6 text-gray-900 hover:text-green-600 transition-colors duration-300">
+          </button>
+          <button onClick={() => scrollToSection('impact')} className="text-sm font-semibold leading-6 text-gray-900 hover:text-green-600 transition-colors duration-300">
             About Us
-          </a>
-          <a href="#" className="text-sm font-semibold leading-6 text-gray-900 hover:text-green-600 transition-colors duration-300">
+          </button>
+          <button onClick={() => scrollToSection('blogs')} className="text-sm font-semibold leading-6 text-gray-900 hover:text-green-600 transition-colors duration-300">
             Blogs
-          </a>
-          <a href="#" className="text-sm font-semibold leading-6 text-gray-900 hover:text-green-600 transition-colors duration-300">
+          </button>
+          <button onClick={() => scrollToSection('contact')} className="text-sm font-semibold leading-6 text-gray-900 hover:text-green-600 transition-colors duration-300">
             Contact
-          </a>
+          </button>
         </div>
 
         {/* Action Buttons */}
-        <div className="hidden lg:flex lg:flex-1 lg:justify-end lg:gap-x-4">
-          <button className="bg-green-600 text-white px-6 py-2 rounded-full text-sm font-semibold hover:bg-green-700 transition-all duration-300 flex items-center gap-2">
+          <div className="hidden lg:flex lg:flex-1 lg:justify-end lg:gap-x-4">
+          <button onClick={() => navigate?.('login')} className="bg-green-600 text-white px-6 py-2 rounded-full text-sm font-semibold hover:bg-green-700 transition-all duration-300 flex items-center gap-2">
             <Heart size={16} />
             Donate
           </button>
-          <button className="border border-green-600 text-green-600 px-6 py-2 rounded-full text-sm font-semibold hover:bg-green-600 hover:text-white transition-all duration-300 flex items-center gap-2">
+          <button onClick={() => navigate?.('login')} className="border border-green-600 text-green-600 px-6 py-2 rounded-full text-sm font-semibold hover:bg-green-600 hover:text-white transition-all duration-300 flex items-center gap-2">
             <User size={16} />
             Log in
           </button>
@@ -197,43 +209,43 @@ export default function LandingPage({ navigate }){
             <div className="mt-6 flow-root">
               <div className="-my-6 divide-y divide-gray-500/10">
                 <div className="space-y-2 py-6">
-                  <a
-                    href="#"
+                  <button
+                    onClick={() => scrollToSection('home')}
                     className="-mx-3 block rounded-lg px-3 py-2 text-base font-semibold leading-7 text-gray-900 hover:bg-gray-50"
                   >
                     Home
-                  </a>
-                  <a
-                    href="#"
+                  </button>
+                  <button
+                    onClick={() => scrollToSection('activities')}
                     className="-mx-3 block rounded-lg px-3 py-2 text-base font-semibold leading-7 text-gray-900 hover:bg-gray-50"
                   >
                     Activities
-                  </a>
-                  <a
-                    href="#"
+                  </button>
+                  <button
+                    onClick={() => scrollToSection('impact')}
                     className="-mx-3 block rounded-lg px-3 py-2 text-base font-semibold leading-7 text-gray-900 hover:bg-gray-50"
                   >
                     About Us
-                  </a>
-                  <a
-                    href="#"
+                  </button>
+                  <button
+                    onClick={() => scrollToSection('blogs')}
                     className="-mx-3 block rounded-lg px-3 py-2 text-base font-semibold leading-7 text-gray-900 hover:bg-gray-50"
                   >
                     Blogs
-                  </a>
-                  <a
-                    href="#"
+                  </button>
+                  <button
+                    onClick={() => scrollToSection('contact')}
                     className="-mx-3 block rounded-lg px-3 py-2 text-base font-semibold leading-7 text-gray-900 hover:bg-gray-50"
                   >
                     Contact
-                  </a>
+                  </button>
                 </div>
                 <div className="py-6 space-y-3">
-                  <button className="w-full bg-green-600 text-white px-6 py-3 rounded-full text-sm font-semibold hover:bg-green-700 transition-all duration-300 flex items-center justify-center gap-2">
+                  <button onClick={() => navigate?.('login')} className="w-full bg-green-600 text-white px-6 py-3 rounded-full text-sm font-semibold hover:bg-green-700 transition-all duration-300 flex items-center justify-center gap-2">
                     <Heart size={16} />
                     Donate
                   </button>
-                  <button className="w-full border border-green-600 text-green-600 px-6 py-3 rounded-full text-sm font-semibold hover:bg-green-600 hover:text-white transition-all duration-300 flex items-center justify-center gap-2">
+                  <button onClick={() => navigate?.('login')} className="w-full border border-green-600 text-green-600 px-6 py-3 rounded-full text-sm font-semibold hover:bg-green-600 hover:text-white transition-all duration-300 flex items-center justify-center gap-2">
                     <User size={16} />
                     Log in
                   </button>
@@ -244,31 +256,33 @@ export default function LandingPage({ navigate }){
         </div>
       )}
     </header>
-      <section className="relative bg-gradient-to-br from-green-600 via-green-500 to-emerald-600 min-h-screen flex items-center">
+  <section id="home" className="relative bg-gradient-to-br from-green-600 via-green-500 to-emerald-600 min-h-screen flex items-center">
         <div className="absolute inset-0 bg-black/20"></div>
         <div className="absolute inset-0 opacity-10" style={{
           backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='m36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`
         }}></div>
         
         <div className="container mx-auto px-6 relative z-10">
-          <div className="max-w-4xl">
-            <h1 className="text-6xl md:text-7xl font-bold text-white mb-6 leading-tight">
+          {/* decorative blurred backdrop behind hero */}
+          <div className="absolute left-1/2 top-20 -translate-x-1/2 w-80 h-80 rounded-full bg-white/10 filter blur-3xl pointer-events-none" />
+          <div className="max-w-4xl mx-auto text-center">
+            <h1 className="text-6xl md:text-7xl font-bold text-white mb-6 leading-tight drop-shadow-2xl">
               Plant Trees.
               <br />
               <span className="text-green-200">Clean Air.</span>
               <br />
               Build Tomorrow.
             </h1>
-            <div className='mb-8 text-xl md:text-2xl text-green-50 mb-12 leading-relaxed max-w-2xl'>
+            <div className='mb-8 text-xl md:text-2xl text-green-50 mb-12 leading-relaxed max-w-2xl mx-auto'>
               Join NGOs and volunteers in fighting pollution by planting trees where it matters most. Together, we can create a greener, healthier future for our communities.
             </div>
-            
-            <div className="flex flex-col sm:flex-row gap-4">
-              <button onClick={() => navigate?.('donate')} className="bg-white text-green-600 px-8 py-4 rounded-full font-semibold text-lg hover:bg-green-50 transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transform hover:-translate-y-1">
+
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <button onClick={() => navigate?.('login')} className="bg-white text-green-600 px-10 py-4 rounded-full font-semibold text-lg hover:bg-green-50 transition-all duration-300 flex items-center justify-center gap-3 shadow-xl hover:shadow-2xl transform hover:-translate-y-0.5">
                 <TreePine size={24} />
                 Join an Activity
               </button>
-              <button onClick={() => navigate?.('donate')} className="bg-green-700 text-white px-8 py-4 rounded-full font-semibold text-lg hover:bg-green-800 transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transform hover:-translate-y-1">
+              <button onClick={() => navigate?.('login')} className="bg-gradient-to-br from-emerald-500 to-green-600 text-white px-10 py-4 rounded-full font-semibold text-lg hover:from-emerald-600 hover:to-green-700 transition-all duration-300 flex items-center justify-center gap-3 shadow-xl hover:shadow-2xl transform hover:-translate-y-0.5">
                 <Heart size={24} />
                 Donate Now
               </button>
@@ -283,7 +297,7 @@ export default function LandingPage({ navigate }){
         
       </section>
 
-      <section className="py-20 bg-gray-50">
+  <section id="impact" className="py-20 bg-gray-50">
         <div className="container mx-auto px-6">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-bold text-gray-800 mb-4">Our Growing Impact</h2>
@@ -322,7 +336,7 @@ export default function LandingPage({ navigate }){
         </div>
       </section>
 
-      <section className="py-20 bg-white">
+  <section id="activities" className="py-20 bg-white">
         <div className="container mx-auto px-6">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-bold text-gray-800 mb-4">How It Works</h2>
@@ -432,7 +446,7 @@ export default function LandingPage({ navigate }){
         </div>
       </section>
 
-      <section className="py-20 bg-white">
+  <section id="blogs" className="py-20 bg-white">
         <div className="container mx-auto px-6">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-bold text-gray-800 mb-4">Latest from Our Blog</h2>
@@ -485,12 +499,12 @@ export default function LandingPage({ navigate }){
             working together to create a cleaner, healthier planet.
           </p>
           
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <button className="bg-white text-green-600 px-8 py-4 rounded-full font-semibold text-lg hover:bg-green-50 transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transform hover:-translate-y-1">
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <button onClick={() => navigate?.('signup')} className="bg-white text-green-600 px-8 py-4 rounded-full font-semibold text-lg hover:bg-green-50 transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transform hover:-translate-y-1">
               <Users size={24} />
               Join as Volunteer
             </button>
-            <button className="bg-green-700 text-white px-8 py-4 rounded-full font-semibold text-lg hover:bg-green-800 transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transform hover:-translate-y-1">
+            <button onClick={() => navigate?.('signup-ngo')} className="bg-green-700 text-white px-8 py-4 rounded-full font-semibold text-lg hover:bg-green-800 transition-all duration-300 flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transform hover:-translate-y-1">
               <TreePine size={24} />
               Register Your NGO
             </button>
@@ -498,7 +512,7 @@ export default function LandingPage({ navigate }){
         </div>
       </section>
 
-      <footer className="bg-gray-900 text-white py-16">
+  <footer id="contact" className="bg-gray-900 text-white py-16">
         <div className="container mx-auto px-6">
           <div className="grid md:grid-cols-4 gap-8">
             <div className="md:col-span-2">

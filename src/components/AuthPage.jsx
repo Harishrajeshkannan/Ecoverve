@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { ChevronLeft } from 'lucide-react'
 
-export default function AuthPage() {
-  const [isNGO, setIsNGO] = useState(false)
-  const [isLogin, setIsLogin] = useState(true)
+export default function AuthPage({ navigate, initialIsLogin = true, initialIsNGO = false }) {
+  const [isNGO, setIsNGO] = useState(initialIsNGO)
+  const [isLogin, setIsLogin] = useState(initialIsLogin)
   const [formData, setFormData] = useState({ email: '', password: '', name: '', first_name: '', last_name: '', phone: '' })
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
@@ -52,6 +53,9 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-green-50">
       <div className="bg-white p-6 rounded-xl shadow-lg w-[400px]">
+        <button onClick={() => navigate?.('home')} className="flex items-center gap-2 text-gray-600 mb-3">
+          <ChevronLeft size={18} /> Back
+        </button>
         <h2 className="text-2xl font-bold mb-4 text-center">{isLogin ? 'Login' : 'Sign Up'}</h2>
 
         <div className="flex justify-center gap-3 mb-4">
