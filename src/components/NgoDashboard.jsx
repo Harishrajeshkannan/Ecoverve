@@ -43,7 +43,9 @@ import {
   Phone
 } from 'lucide-react';
 
-const NGODashboard = () => {
+import BlogForm from './BlogForm'
+
+const NGODashboard = ({ navigate }) => {
   const [activeTab, setActiveTab] = useState('overview');
   const [activeSubSection, setActiveSubSection] = useState(null);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -943,41 +945,13 @@ const NGODashboard = () => {
     if (activeTab === 'content') {
       if (activeSubSection === 'write-blog') {
         return (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="text-2xl font-bold text-gray-900 mb-6">Write New Blog Post</h3>
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Blog Title *</label>
-                <input
-                  type="text"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter blog title"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Content *</label>
-                <textarea
-                  rows={12}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Write your blog content..."
-                />
-              </div>
-              <div className="flex gap-3">
-                <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-                  Publish Post
-                </button>
-                <button className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors">
-                  Save Draft
-                </button>
-                <button 
-                  onClick={() => setActiveSubSection(null)}
-                  className="px-6 py-3 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
+          <BlogForm
+            onClose={() => setActiveSubSection(null)}
+            onSuccess={() => {
+              setActiveSubSection(null)
+              if (typeof navigate === 'function') navigate('blogs')
+            }}
+          />
         );
       }
 

@@ -478,7 +478,17 @@ export default function LandingPage({ navigate }){
           </div>
           
           <div className="text-center mt-12">
-            <button className="bg-green-600 text-white px-8 py-4 rounded-full font-semibold text-lg hover:bg-green-700 transition-colors duration-300">
+            <button 
+              onClick={() => {
+                console.log('Navigating to blogs');
+                if (navigate) {
+                  navigate('blogs');
+                } else {
+                  console.error('Navigate function not available');
+                }
+              }}
+              className="bg-green-600 text-white px-8 py-4 rounded-full font-semibold text-lg hover:bg-green-700 transition-colors duration-300"
+            >
               View All Blogs
             </button>
           </div>
