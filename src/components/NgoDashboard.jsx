@@ -43,7 +43,9 @@ import {
   Phone
 } from 'lucide-react';
 
-const NGODashboard = () => {
+import BlogForm from './BlogForm'
+
+const NGODashboard = ({ navigate }) => {
   const [activeTab, setActiveTab] = useState('overview');
   const [activeSubSection, setActiveSubSection] = useState(null);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -72,6 +74,18 @@ const NGODashboard = () => {
   const [createSuccess, setCreateSuccess] = useState(null)
   const [updateLoading, setUpdateLoading] = useState(false)
   const [deletingIds, setDeletingIds] = useState(new Set())
+  const [blogPosts, setBlogPosts] = useState([])
+  const [blogPostsLoading, setBlogPostsLoading] = useState(false)
+  const [blogPostsError, setBlogPostsError] = useState(null)
+  const [selectedActivity, setSelectedActivity] = useState(null)
+  const [registeredUsers, setRegisteredUsers] = useState([])
+  const [usersLoading, setUsersLoading] = useState(false)
+  const [usersError, setUsersError] = useState(null)
+  const [_pollutionData, setPollutionData] = useState(null)
+  const [suggestedLocations, setSuggestedLocations] = useState([])
+  const [pollutionLoading, setPollutionLoading] = useState(false)
+  const [pollutionError, setPollutionError] = useState(null)
+  const [showLocationSuggestions, setShowLocationSuggestions] = useState(false)
 
   // Helper to compute status from date
   const computeActivityStatus = (dateStr, existingStatus) => {
@@ -392,7 +406,11 @@ const NGODashboard = () => {
     expectedVolunteers: '',
     saplings: '',
     category: 'Plantation',
-    priority: 'medium'
+    priority: 'medium',
+    latitude: null,
+    longitude: null,
+    pollution_level: null,
+    aqi: null
   });
 
   
@@ -412,28 +430,241 @@ const NGODashboard = () => {
     topPerformer: "Riverbank Restoration"
   };
 
-  const recentPosts = [
-    {
-      id: 1,
-      title: "5 Benefits of Urban Tree Planting",
-      content: "Urban trees provide numerous benefits including air purification, temperature regulation, and improved mental health...",
-      author: "Green Earth Foundation",
-      date: "2024-09-15",
-      likes: 45,
-      comments: 12,
-      views: 234
-    },
-    {
-      id: 2,
-      title: "Success Story: River Valley Restoration",
-      content: "Our recent riverbank restoration project exceeded expectations with 20 volunteers and 75 saplings planted...",
-      author: "Green Earth Foundation",
-      date: "2024-09-22",
-      likes: 67,
-      comments: 18,
-      views: 456
+  // Fetch blog posts created by this NGO
+  const fetchBlogPosts = useCallback(async () => {
+    try {
+      setBlogPostsLoading(true)
+      setBlogPostsError(null)
+      
+      const { data: userData, error: userErr } = await supabase.auth.getUser()
+      if (userErr) throw userErr
+      const user = userData?.user
+      if (!user) throw new Error('Not authenticated')
+
+      const { data: posts, error: postsError } = await supabase
+        .from('blogs')
+        .select('*')
+        .eq('author_id', user.id)
+        .order('created_at', { ascending: false })
+
+      if (postsError) throw postsError
+      setBlogPosts(posts || [])
+    } catch (error) {
+      console.error('Error fetching blog posts:', error)
+      setBlogPostsError(error.message)
+    } finally {
+      setBlogPostsLoading(false)
     }
-  ];
+  }, [])
+
+  // Fetch registered users for a specific activity
+  const fetchRegisteredUsers = useCallback(async (activityId) => {
+    try {
+      setUsersLoading(true)
+      setUsersError(null)
+
+      // Step 1: Get all user registrations for this specific activity from user_activities table
+      const { data: userActivities, error: userActivitiesError } = await supabase
+        .from('user_activities')
+        .select('*')
+        .eq('activity_id', activityId)
+
+      if (userActivitiesError) {
+        throw new Error(`Error fetching user activities: ${userActivitiesError.message}`)
+      }
+
+      if (!userActivities || userActivities.length === 0) {
+        setRegisteredUsers([])
+        return
+      }
+
+      // Step 2: Extract user IDs from user_activities records
+      const userIds = userActivities.map(ua => ua.user_id)
+      console.log(`Found ${userIds.length} registered users for activity ${activityId}`)
+
+      // Step 3: Fetch complete user details from user_details table using extracted user IDs
+      const { data: userDetails, error: userDetailsError } = await supabase
+        .from('user_details')
+        .select('*')
+        .in('id', userIds)
+
+      if (userDetailsError) {
+        throw new Error(`Error fetching user details: ${userDetailsError.message}`)
+      }
+
+      // Step 4: Combine user_activities data with user_details data
+      const enrichedUsers = userActivities.map((ua) => {
+        // Find matching user details for this user_id
+        const userDetail = userDetails?.find(d => d.id === ua.user_id)
+        
+        return {
+          id: ua.id, // user_activities record id
+          user_id: ua.user_id,
+          activity_id: ua.activity_id,
+          participated: ua.participated || false,
+          registered_at: ua.created_at,
+          updated_at: ua.updated_at,
+          // User details from user_details table
+          name: userDetail?.name || userDetail?.full_name || 'Name not available',
+          email: userDetail?.email || 'Email not available', 
+          phone: userDetail?.phone || 'Phone not available',
+          address: userDetail?.address || 'Address not available',
+          profile_picture: userDetail?.profile_picture || userDetail?.avatar_url || null,
+          age: userDetail?.age || null,
+          gender: userDetail?.gender || null
+        }
+      })
+
+      console.log(`Successfully fetched details for ${enrichedUsers.length} users`)
+      setRegisteredUsers(enrichedUsers)
+      
+    } catch (error) {
+      console.error('Error in fetchRegisteredUsers:', error)
+      setUsersError(error.message)
+    } finally {
+      setUsersLoading(false)
+    }
+  }, [])
+
+  // Fetch pollution data and suggest plantation locations
+  const fetchPollutionSuggestions = useCallback(async () => {
+    try {
+      setPollutionLoading(true)
+      setPollutionError(null)
+      setSuggestedLocations([])
+
+      // Get user's current location or use default coordinates (Mumbai as example)
+      let latitude = 19.0760; // Mumbai coordinates as default
+      let longitude = 72.8777;
+
+      try {
+        if (navigator.geolocation) {
+          const position = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              timeout: 10000,
+              enableHighAccuracy: false
+            })
+          })
+          latitude = position.coords.latitude
+          longitude = position.coords.longitude
+        }
+      } catch {
+        console.log('Using default location (Mumbai) as user location unavailable')
+      }
+
+      // Using a mock pollution API response for demonstration
+      // In production, you would use a real API like OpenWeatherMap Air Pollution API
+      // const apiKey = 'YOUR_API_KEY'
+      // const response = await fetch(`https://api.openweathermap.org/data/2.5/air_pollution?lat=${latitude}&lon=${longitude}&appid=${apiKey}`)
+      
+      // Mock highly polluted areas with detailed addresses for demonstration
+      const mockPollutionData = {
+        current_location: { lat: latitude, lon: longitude },
+        pollution_index: 4, // Scale 1-5, 5 being most polluted
+        suggested_locations: [
+          {
+            id: 1,
+            name: 'Chakala Industrial Estate, Near International Airport, Andheri East, Mumbai - 400099',
+            latitude: 19.1136,
+            longitude: 72.8697,
+            pollution_level: 5,
+            aqi: 301,
+            description: 'High industrial pollution from manufacturing units, urgent need for plantation',
+            suitable_trees: ['Neem', 'Peepal', 'Banyan'],
+            distance: '8.5 km from your location'
+          },
+          {
+            id: 2,
+            name: 'Eastern Express Highway Junction, Near Mulund Toll Plaza, Thane - 400607',  
+            latitude: 19.2183,
+            longitude: 72.9781,
+            pollution_level: 4,
+            aqi: 267,
+            description: 'Heavy traffic area with poor air quality from vehicle emissions',
+            suitable_trees: ['Ashoka', 'Gulmohar', 'Rain Tree'],
+            distance: '25 km from your location'
+          },
+          {
+            id: 3,
+            name: 'Dahanu Thermal Power Station Road, Near NTPC Colony, Dahanu, Palghar - 401602',
+            latitude: 19.9667,
+            longitude: 72.7333,
+            pollution_level: 5,
+            aqi: 289,
+            description: 'Coal power plant area requiring immediate green intervention',
+            suitable_trees: ['Eucalyptus', 'Casuarina', 'Bamboo'],
+            distance: '120 km from your location'
+          },
+          {
+            id: 4,
+            name: 'JNPT Port Road, Sector 7, Near Container Terminal, Uran, Navi Mumbai - 410206',
+            latitude: 18.9647,
+            longitude: 72.9505,
+            pollution_level: 4,
+            aqi: 245,
+            description: 'Port activities and heavy vehicle movement contribute to air pollution',
+            suitable_trees: ['Coconut Palm', 'Mangroves', 'Casuarina'],
+            distance: '35 km from your location'
+          },
+          {
+            id: 5,
+            name: 'Taloja Industrial Area, MIDC Phase IV, Near Reliance SEZ, Navi Mumbai - 410208',
+            latitude: 19.0330,
+            longitude: 73.0297,
+            pollution_level: 5,
+            aqi: 278,
+            description: 'Chemical and pharmaceutical industries causing severe air contamination',
+            suitable_trees: ['Neem', 'Karanja', 'Subabul'],
+            distance: '42 km from your location'
+          },
+          {
+            id: 6,
+            name: 'National Highway 8, Near Rajiv Gandhi Bridge, Vasai Road, Palghar - 401202',
+            latitude: 19.4909,
+            longitude: 72.8111,
+            pollution_level: 4,
+            aqi: 234,
+            description: 'Major highway with constant heavy vehicle traffic and dust pollution',
+            suitable_trees: ['Gulmohar', 'Indian Rosewood', 'Silver Oak'],
+            distance: '65 km from your location'
+          }
+        ]
+      }
+
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 2000))
+
+      setPollutionData(mockPollutionData)
+      setSuggestedLocations(mockPollutionData.suggested_locations)
+      setShowLocationSuggestions(true)
+
+    } catch (error) {
+      console.error('Error fetching pollution data:', error)
+      setPollutionError('Failed to fetch pollution data. Please try again.')
+    } finally {
+      setPollutionLoading(false)
+    }
+  }, [])
+
+  // Select a suggested location
+  const selectSuggestedLocation = (location) => {
+    setNewActivity({
+      ...newActivity,
+      location: location.name,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      pollution_level: location.pollution_level,
+      aqi: location.aqi
+    })
+    setShowLocationSuggestions(false)
+  }
+
+  // Fetch blog posts when component mounts or when content tab is activated
+  useEffect(() => {
+    if (activeTab === 'content') {
+      fetchBlogPosts()
+    }
+  }, [activeTab, fetchBlogPosts])
 
   const handleCreateActivity = async () => {
     setCreateError(null)
@@ -463,7 +694,10 @@ const NGODashboard = () => {
         status: 'upcoming',
         budget_estimate: newActivity.budget_estimate ?? null,
         funds_received: 0,
-        pollution_score: null
+        pollution_score: newActivity.pollution_level || null,
+        latitude: newActivity.latitude || null,
+        longitude: newActivity.longitude || null,
+        aqi: newActivity.aqi || null
       }
 
       const { data: inserted, error: insertErr } = await supabase
@@ -503,9 +737,15 @@ const NGODashboard = () => {
         expectedVolunteers: '',
         saplings: '',
         category: 'Plantation',
-        priority: 'medium'
+        priority: 'medium',
+        latitude: null,
+        longitude: null,
+        pollution_level: null,
+        aqi: null
       })
       setActiveSubSection(null)
+      setShowLocationSuggestions(false)
+      setPollutionError(null)
       setCreateSuccess('Activity created successfully')
       // ensure DB counts/statuses are correct after creation
       reconcileActivityStatuses()
@@ -585,8 +825,14 @@ const NGODashboard = () => {
         expectedVolunteers: '',
         saplings: '',
         category: 'Plantation',
-        priority: 'medium'
+        priority: 'medium',
+        latitude: null,
+        longitude: null,
+        pollution_level: null,
+        aqi: null
       })
+      setShowLocationSuggestions(false)
+      setPollutionError(null)
       setCreateSuccess('Activity updated')
       // ensure DB counts/statuses are correct after update
       reconcileActivityStatuses()
@@ -663,7 +909,16 @@ const NGODashboard = () => {
   );
 
   const ActivityCard = ({ activity, isCompact = false }) => (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-300">
+    <div 
+      className="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-300 cursor-pointer"
+      onClick={() => {
+        if (!isCompact) {
+          setSelectedActivity(activity)
+          setActiveSubSection('activity-details')
+          fetchRegisteredUsers(activity.id)
+        }
+      }}
+    >
       <div className="p-6">
         <div className="flex justify-between items-start mb-4">
           <div className="flex-1">
@@ -694,13 +949,19 @@ const NGODashboard = () => {
             {!isCompact && (
               <div className="flex gap-1">
                 <button 
-                  onClick={() => handleEditActivity(activity)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleEditActivity(activity)
+                  }}
                   className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                 >
                   <Edit3 className="h-4 w-4" />
                 </button>
                 <button 
-                  onClick={() => handleDeleteActivity(activity.id)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleDeleteActivity(activity.id)
+                  }}
                   className={`p-2 ${deletingIds.has(activity.id) ? 'text-gray-400' : 'text-red-600 hover:bg-red-50'} rounded-lg transition-colors`}
                   disabled={deletingIds.has(activity.id)}
                 >
@@ -717,9 +978,14 @@ const NGODashboard = () => {
               <Users className="h-4 w-4 mr-1" />
               {activity.registeredVolunteers}/{activity.expectedVolunteers} volunteers
             </div>
-            <div className="flex items-center text-gray-600">
-              <TreePine className="h-4 w-4 mr-1" />
-              {activity.saplings} saplings
+            <div className="flex items-center gap-4">
+              <div className="flex items-center text-gray-600">
+                <TreePine className="h-4 w-4 mr-1" />
+                {activity.saplings} saplings
+              </div>
+              <div className="text-xs text-green-600 font-medium">
+                Click to view details →
+              </div>
             </div>
           </div>
         )}
@@ -828,15 +1094,95 @@ const NGODashboard = () => {
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                 />
               </div>
-              <div>
+              <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Location *</label>
-                <input
-                  type="text"
-                  value={newActivity.location}
-                  onChange={(e) => setNewActivity({...newActivity, location: e.target.value})}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                  placeholder="Enter location"
-                />
+                <div className="space-y-3">
+                  <div className="flex gap-2">
+                    <div className="flex-1 relative">
+                      <input
+                        type="text"
+                        value={newActivity.location}
+                        onChange={(e) => setNewActivity({...newActivity, location: e.target.value})}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                        placeholder="Enter location or use pollution-based suggestions"
+                      />
+                      {newActivity.pollution_level && (
+                        <div className="absolute -top-2 -right-2 px-2 py-1 bg-orange-100 text-orange-800 text-xs rounded-full border border-orange-300 flex items-center gap-1">
+                          <Target className="h-3 w-3" />
+                          High Pollution Area (AQI: {newActivity.aqi})
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={fetchPollutionSuggestions}
+                      disabled={pollutionLoading}
+                      className="px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors disabled:bg-orange-400 flex items-center gap-2 whitespace-nowrap"
+                    >
+                      {pollutionLoading ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          Finding...
+                        </>
+                      ) : (
+                        <>
+                          <Globe className="h-4 w-4" />
+                          Find Polluted Areas
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  
+                  {pollutionError && (
+                    <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm">
+                      {pollutionError}
+                    </div>
+                  )}
+                  
+                  {showLocationSuggestions && suggestedLocations.length > 0 && (
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                      <h4 className="text-sm font-semibold text-orange-900 mb-3 flex items-center">
+                        <Target className="h-4 w-4 mr-2" />
+                        High Pollution Areas Needing Plantation (Click to select)
+                      </h4>
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {suggestedLocations.map((location) => (
+                          <div
+                            key={location.id}
+                            onClick={() => selectSuggestedLocation(location)}
+                            className="p-3 bg-white border border-orange-200 rounded-lg cursor-pointer hover:bg-orange-50 transition-colors"
+                          >
+                            <div className="flex justify-between items-start mb-2">
+                              <h5 className="font-medium text-gray-900">{location.name}</h5>
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                  location.pollution_level === 5 
+                                    ? 'bg-red-100 text-red-800' 
+                                    : location.pollution_level === 4 
+                                    ? 'bg-orange-100 text-orange-800'
+                                    : 'bg-yellow-100 text-yellow-800'
+                                }`}>
+                                  AQI: {location.aqi}
+                                </span>
+                                <span className="text-xs text-gray-500">{location.distance}</span>
+                              </div>
+                            </div>
+                            <p className="text-sm text-gray-600 mb-2">{location.description}</p>
+                            <div className="text-xs text-green-700">
+                              <strong>Recommended trees:</strong> {location.suitable_trees.join(', ')}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => setShowLocationSuggestions(false)}
+                        className="mt-3 text-sm text-orange-600 hover:text-orange-700 underline"
+                      >
+                        Close suggestions
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Expected Volunteers</label>
@@ -879,8 +1225,14 @@ const NGODashboard = () => {
                     expectedVolunteers: '',
                     saplings: '',
                     category: 'Plantation',
-                    priority: 'medium'
+                    priority: 'medium',
+                    latitude: null,
+                    longitude: null,
+                    pollution_level: null,
+                    aqi: null
                   });
+                  setShowLocationSuggestions(false);
+                  setPollutionError(null);
                 }}
                 className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
               >
@@ -891,6 +1243,141 @@ const NGODashboard = () => {
               {createError && <div className="text-sm text-red-600">{createError}</div>}
               {createSuccess && <div className="text-sm text-green-600">{createSuccess}</div>}
             </div>
+          </div>
+        );
+      }
+
+      if (activeSubSection === 'activity-details') {
+        return (
+          <div className="space-y-6">
+            {/* Back Button and Header */}
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => {
+                  setActiveSubSection(null)
+                  setSelectedActivity(null)
+                  setRegisteredUsers([])
+                }}
+                className="flex items-center text-gray-600 hover:text-gray-900 transition-colors"
+              >
+                <ChevronRight className="h-4 w-4 mr-1 rotate-180" />
+                Back to Activities
+              </button>
+            </div>
+
+            {/* Activity Details */}
+            {selectedActivity && (
+              <div className="bg-white rounded-xl shadow-sm p-6">
+                <div className="border-b border-gray-200 pb-6 mb-6">
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">{selectedActivity.title}</h2>
+                  <p className="text-gray-600 mb-4">{selectedActivity.description}</p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="flex items-center text-gray-600">
+                      <Calendar className="h-5 w-5 mr-2" />
+                      <div>
+                        <div className="font-medium">Date</div>
+                        <div className="text-sm">{new Date(selectedActivity.date).toLocaleDateString()}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center text-gray-600">
+                      <MapPin className="h-5 w-5 mr-2" />
+                      <div>
+                        <div className="font-medium">Location</div>
+                        <div className="text-sm">{selectedActivity.location}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center text-gray-600">
+                      <Users className="h-5 w-5 mr-2" />
+                      <div>
+                        <div className="font-medium">Volunteers</div>
+                        <div className="text-sm">{selectedActivity.registeredVolunteers}/{selectedActivity.expectedVolunteers} registered</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Registered Users Section */}
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                    Registered Volunteers ({registeredUsers.length})
+                  </h3>
+                  
+                  {usersLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="text-gray-600">Loading registered users...</div>
+                    </div>
+                  ) : usersError ? (
+                    <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded">
+                      Error loading registered users: {usersError}
+                      <button 
+                        onClick={() => fetchRegisteredUsers(selectedActivity.id)}
+                        className="ml-2 text-red-800 underline hover:no-underline"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : registeredUsers.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <h4 className="text-gray-900 font-medium mb-2">No registered volunteers yet</h4>
+                      <p className="text-gray-600">Users will appear here once they register for this activity</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {registeredUsers.map(user => (
+                        <div key={user.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-4">
+                              <div className="flex-shrink-0">
+                                {user.profile_picture ? (
+                                  <img
+                                    src={user.profile_picture}
+                                    alt={user.name}
+                                    className="h-10 w-10 rounded-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
+                                    <User className="h-5 w-5 text-green-600" />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex-1">
+                                <h4 className="text-sm font-medium text-gray-900">{user.name}</h4>
+                                <div className="flex items-center gap-4 text-xs text-gray-600">
+                                  <span className="flex items-center">
+                                    <Mail className="h-3 w-3 mr-1" />
+                                    {user.email}
+                                  </span>
+                                  {user.phone !== 'N/A' && (
+                                    <span className="flex items-center">
+                                      <Phone className="h-3 w-3 mr-1" />
+                                      {user.phone}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs text-gray-500">
+                                Registered: {new Date(user.registered_at).toLocaleDateString()}
+                              </span>
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                user.participated 
+                                  ? 'bg-green-100 text-green-800' 
+                                  : 'bg-gray-100 text-gray-800'
+                              }`}>
+                                {user.participated ? 'Participated' : 'Registered'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         );
       }
@@ -943,41 +1430,14 @@ const NGODashboard = () => {
     if (activeTab === 'content') {
       if (activeSubSection === 'write-blog') {
         return (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="text-2xl font-bold text-gray-900 mb-6">Write New Blog Post</h3>
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Blog Title *</label>
-                <input
-                  type="text"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter blog title"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Content *</label>
-                <textarea
-                  rows={12}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Write your blog content..."
-                />
-              </div>
-              <div className="flex gap-3">
-                <button className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-                  Publish Post
-                </button>
-                <button className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors">
-                  Save Draft
-                </button>
-                <button 
-                  onClick={() => setActiveSubSection(null)}
-                  className="px-6 py-3 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
+          <BlogForm
+            onClose={() => setActiveSubSection(null)}
+            onSuccess={() => {
+              setActiveSubSection(null)
+              fetchBlogPosts() // Refresh blog posts after creating a new one
+              if (typeof navigate === 'function') navigate('blogs')
+            }}
+          />
         );
       }
 
@@ -992,42 +1452,82 @@ const NGODashboard = () => {
 
           {/* Recent Posts */}
           <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Blog Posts</h3>
-            <div className="space-y-4">
-              {recentPosts.map(post => (
-                <div key={post.id} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex justify-between items-start mb-2">
-                    <h4 className="font-medium text-gray-900">{post.title}</h4>
-                    <span className="text-sm text-gray-500">{new Date(post.date).toLocaleDateString()}</span>
-                  </div>
-                  <p className="text-gray-600 text-sm mb-3">{post.content}</p>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4 text-sm text-gray-600">
-                      <div className="flex items-center">
-                        <Eye className="h-4 w-4 mr-1" />
-                        {post.views}
-                      </div>
-                      <div className="flex items-center">
-                        <Heart className="h-4 w-4 mr-1" />
-                        {post.likes}
-                      </div>
-                      <div className="flex items-center">
-                        <MessageCircle className="h-4 w-4 mr-1" />
-                        {post.comments}
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button className="p-1 text-blue-600 hover:bg-blue-50 rounded">
-                        <Edit3 className="h-4 w-4" />
-                      </button>
-                      <button className="p-1 text-green-600 hover:bg-green-50 rounded">
-                        <Share className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">My Blog Posts</h3>
+              <button 
+                onClick={() => setActiveSubSection('write-blog')}
+                className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Write New Post
+              </button>
             </div>
+            
+            {blogPostsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="text-gray-600">Loading blog posts...</div>
+              </div>
+            ) : blogPostsError ? (
+              <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded">
+                Error loading blog posts: {blogPostsError}
+                <button 
+                  onClick={fetchBlogPosts}
+                  className="ml-2 text-red-800 underline hover:no-underline"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : blogPosts.length === 0 ? (
+              <div className="text-center py-8">
+                <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <h4 className="text-gray-900 font-medium mb-2">No blog posts yet</h4>
+                <p className="text-gray-600 mb-4">Start sharing your NGO's story and environmental initiatives</p>
+                <button 
+                  onClick={() => setActiveSubSection('write-blog')}
+                  className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors mx-auto"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Write Your First Post
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {blogPosts.map(post => (
+                  <div key={post.id} className="border border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors">
+                    <div className="flex justify-between items-start mb-2">
+                      <h4 className="font-medium text-gray-900">{post.title}</h4>
+                      <span className="text-sm text-gray-500">
+                        {new Date(post.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                    {post.summary && (
+                      <p className="text-gray-600 text-sm mb-3">{post.summary}</p>
+                    )}
+                    {post.category && (
+                      <span className="inline-block px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded mb-3">
+                        {post.category}
+                      </span>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs text-gray-500">
+                        Updated: {new Date(post.updated_at).toLocaleDateString()}
+                      </div>
+                      <div className="flex gap-2">
+                        <button className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Edit post">
+                          <Edit3 className="h-4 w-4" />
+                        </button>
+                        <button className="p-1 text-green-600 hover:bg-green-50 rounded" title="View post">
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <button className="p-1 text-red-600 hover:bg-red-50 rounded" title="Delete post">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       );

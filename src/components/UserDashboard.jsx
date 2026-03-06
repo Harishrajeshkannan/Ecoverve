@@ -9,6 +9,7 @@ import {
   Camera, Save, Globe, Mail, Phone, Zap,
   CheckCircle, Clock, Edit3, Trash2, Plus
 } from 'lucide-react';
+import BlogForm from './BlogForm'
 
 const UserDashboard = ({ navigate }) => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -49,15 +50,20 @@ const UserDashboard = ({ navigate }) => {
       const payload = {
         user_id: user.id,
         activity_id: activityId,
-        participated: false,
-        donation: 0
+        participated: false
       }
 
-      const { error } = await supabase
+      const { data: insertedData, error } = await supabase
         .from('user_activities')
         .insert(payload)
+        .select()
 
-      if (error) throw error
+      if (error) {
+        console.error('Error inserting user_activities:', error);
+        throw error;
+      }
+      
+      console.debug('Activity joined successfully:', { activityId, userId: user.id, insertedData });
 
       // mark as joined locally in allActivities
       setAllActivities(prev => prev.map(a => a.id === activityId ? ({ ...a, participated: true }) : a))
@@ -82,7 +88,6 @@ const UserDashboard = ({ navigate }) => {
           registeredVolunteers: a.volunteer_count ?? 0,
           organizer: null,
           points: 0,
-          donation: 0,
           participated: true
         }
 
@@ -92,7 +97,15 @@ const UserDashboard = ({ navigate }) => {
         })
       }
     } catch (err) {
-      console.error('Error joining activity', err)
+      console.error('Error joining activity:', err);
+      console.error('Error details:', {
+        message: err.message,
+        code: err.code,
+        details: err.details,
+        hint: err.hint,
+        fullError: JSON.stringify(err)
+      });
+      alert(`Failed to join activity: ${err.message || 'Unknown error'}`);
     } finally {
       setJoinLoadingIds(prev => {
         const copy = new Set(prev)
@@ -101,6 +114,50 @@ const UserDashboard = ({ navigate }) => {
       })
     }
   }
+
+  const handleDeleteActivity = async (activityId) => {
+    try {
+      const { data: userDataResp, error: userErr } = await supabase.auth.getUser()
+      if (userErr) throw userErr
+      const user = userDataResp?.user
+      if (!user) throw new Error('Not authenticated')
+
+      // First, delete all user registrations for this activity from user_activities table
+      const { error: deleteUserActErr } = await supabase
+        .from('user_activities')
+        .delete()
+        .eq('activity_id', activityId)
+
+      if (deleteUserActErr) {
+        console.error('Error deleting user activity records:', deleteUserActErr)
+        throw deleteUserActErr
+      }
+
+      console.debug('Deleted all user registrations for activity:', { activityId })
+
+      // Then, delete from user_activities for current user
+      const { error: deleteErr } = await supabase
+        .from('user_activities')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('activity_id', activityId)
+
+      if (deleteErr) {
+        console.error('Error deleting activity:', deleteErr)
+        throw deleteErr
+      }
+
+      console.debug('Activity deleted successfully:', { activityId, userId: user.id })
+
+      // Remove from local state
+      setUserActivities(prev => prev.filter(a => a.id !== activityId))
+      alert('Activity deleted successfully')
+    } catch (err) {
+      console.error('Error deleting activity:', err)
+      alert(`Failed to delete activity: ${err.message || 'Unknown error'}`)
+    }
+  }
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -179,13 +236,15 @@ const UserDashboard = ({ navigate }) => {
         if (uDetErr && uDetErr.code !== 'PGRST116') throw uDetErr
 
         // Fetch user_dashboard
-        const { data: uDash, error: uDashErr } = await supabase
+        const { data: uDashData, error: uDashErr } = await supabase
           .from('user_dashboard')
           .select('*')
           .eq('user_id', user.id)
-          .maybeSingle()
+          .order('created_at', { ascending: false })
+          .limit(1)
 
         if (uDashErr) throw uDashErr
+        const uDash = uDashData?.[0] ?? null
 
         // Fetch user_activities (join to get activity details)
         const { data: ua, error: uaErr } = await supabase
@@ -435,7 +494,7 @@ const UserDashboard = ({ navigate }) => {
     </div>
   );
 
-  const ActivityCard = ({ activity, isCompact = false, showJoin = false, onJoin = null }) => (
+  const ActivityCard = ({ activity, isCompact = false, showJoin = false, onJoin = null, showDelete = false, onDelete = null }) => (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-300">
       <div className="p-6">
         <div className="flex justify-between items-start mb-4">
@@ -476,6 +535,19 @@ const UserDashboard = ({ navigate }) => {
                 disabled={joinLoadingIds.has(activity.id)}
               >
                 {activity.participated ? 'Joined' : 'Join'}
+              </button>
+            )}
+            {showDelete && (
+              <button 
+                onClick={() => {
+                  if (window.confirm('Are you sure you want to delete this activity?')) {
+                    onDelete && onDelete(activity.id)
+                  }
+                }}
+                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                title="Delete activity"
+              >
+                <Trash2 className="h-4 w-4" />
               </button>
             )}
           </div>
@@ -696,7 +768,7 @@ const UserDashboard = ({ navigate }) => {
               <h3 className="text-lg font-semibold text-gray-900 mb-4">All Activities</h3>
               <div className="space-y-4">
                 {userActivities.slice(0, 50).map(activity => (
-                  <ActivityCard key={activity.id} activity={activity} />
+                  <ActivityCard key={activity.id} activity={activity} showDelete={true} onDelete={handleDeleteActivity} />
                 ))}
               </div>
             </div>
@@ -772,42 +844,15 @@ const UserDashboard = ({ navigate }) => {
     if (activeTab === 'community') {
       if (activeSubSection === 'write-blog') {
         return (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="text-2xl font-bold text-gray-900 mb-6">Write New Blog Post</h3>
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Blog Title *</label>
-                <input
-                  type="text"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                  placeholder="Enter blog title"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Content *</label>
-                <textarea
-                  rows={12}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                  placeholder="Share your eco-friendly thoughts and experiences..."
-                />
-              </div>
-              <div className="flex gap-3">
-                <button className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                  Publish Post
-                </button>
-                <button className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors">
-                  Save Draft
-                </button>
-                <button 
-                  onClick={() => setActiveSubSection(null)}
-                  className="px-6 py-3 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        );
+          <BlogForm
+            onClose={() => setActiveSubSection(null)}
+            onSuccess={() => {
+              // close editor and go to blogs listing
+              setActiveSubSection(null)
+              navigate('blogs')
+            }}
+          />
+        )
       }
 
       return (
@@ -1037,7 +1082,8 @@ const UserDashboard = ({ navigate }) => {
   const menuItems = [
     { id: 'overview', label: 'Overview', icon: Home },
     { id: 'activities', label: 'My Activities', icon: Calendar },
-  { id: 'donations', label: 'Donations', icon: IndianRupee },
+    { id: 'donations', label: 'Donations', icon: IndianRupee },
+    { id: 'blogs', label: 'Blogs', icon: BookOpen },
     { id: 'community', label: 'Community', icon: Users },
     { id: 'profile', label: 'Profile', icon: User }
   ];
@@ -1068,8 +1114,12 @@ const UserDashboard = ({ navigate }) => {
                 <button
                   key={item.id}
                   onClick={() => {
-                    setActiveTab(item.id);
-                    setActiveSubSection(null);
+                    if (item.id === 'blogs') {
+                      navigate('blogs');
+                    } else {
+                      setActiveTab(item.id);
+                      setActiveSubSection(null);
+                    }
                   }}
                   className={`w-full flex items-center px-4 py-3 text-left rounded-lg transition-all duration-200 ${
                     activeTab === item.id

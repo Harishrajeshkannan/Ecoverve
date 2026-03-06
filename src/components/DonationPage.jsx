@@ -54,16 +54,37 @@ const DonationPage = ({ navigate }) => {
       if (userId) {
         const { data: existingUserDash } = await supabase
           .from('user_dashboard')
-          .select('total_donation')
+          .select('*')
           .eq('user_id', userId)
           .maybeSingle()
 
-        const newUserTotal = (existingUserDash?.total_donation || 0) + amount
-
-        // upsert the total_donation for this user
-        await supabase
-          .from('user_dashboard')
-          .upsert({ user_id: userId, total_donation: newUserTotal }, { onConflict: 'user_id' })
+        if (existingUserDash) {
+          // Update existing record
+          const { error: updateError } = await supabase
+            .from('user_dashboard')
+            .update({ 
+              total_donation: (existingUserDash.total_donation || 0) + amount,
+              updated_at: new Date().toISOString()
+            })
+            .eq('user_id', userId)
+          
+          if (updateError) throw updateError
+        } else {
+          // Insert new record with default values
+          const { error: insertError } = await supabase
+            .from('user_dashboard')
+            .insert({
+              user_id: userId,
+              total_donation: amount,
+              trees_planted: 0,
+              events_joined: 0,
+              impact_score: 0,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+          
+          if (insertError) throw insertError
+        }
       }
 
       // Update ngo_dashboard.total_donation for the NGO
