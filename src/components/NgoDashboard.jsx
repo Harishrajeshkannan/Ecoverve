@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient'
 import { 
   TreePine, 
@@ -86,6 +86,10 @@ const NGODashboard = ({ navigate }) => {
   const [pollutionLoading, setPollutionLoading] = useState(false)
   const [pollutionError, setPollutionError] = useState(null)
   const [showLocationSuggestions, setShowLocationSuggestions] = useState(false)
+  const [imageUploading, setImageUploading] = useState(new Set())
+
+  // Ref for file input
+  const fileInputRef = useRef(null)
 
   // Helper to compute status from date
   const computeActivityStatus = (dateStr, existingStatus) => {
@@ -193,7 +197,7 @@ const NGODashboard = ({ navigate }) => {
         saplings: 0,
         category: a.category ?? 'General',
         priority: 'medium',
-        image: null,
+        image: a.image || null,
         volunteers: []
       }))
       setActivities(mapped)
@@ -659,6 +663,97 @@ const NGODashboard = ({ navigate }) => {
     setShowLocationSuggestions(false)
   }
 
+  // Handle image upload for completed activities
+  const handleImageUpload = async (activityId, imageFile) => {
+    try {
+      setImageUploading(prev => new Set(prev).add(activityId))
+
+      // Create a unique filename
+      const fileExt = imageFile.name.split('.').pop()
+      const fileName = `${activityId}_${Date.now()}.${fileExt}`
+      const filePath = `activity-images/${fileName}`
+
+      // Upload image to Supabase Storage
+      const { data: _uploadData, error: uploadError } = await supabase.storage
+        .from('activity-images')
+        .upload(filePath, imageFile, {
+          cacheControl: '3600',
+          upsert: false
+        })
+
+      if (uploadError) {
+        throw new Error(`Upload failed: ${uploadError.message}`)
+      }
+
+      // Get public URL for the uploaded image
+      const { data: publicUrl } = supabase.storage
+        .from('activity-images')
+        .getPublicUrl(filePath)
+
+      if (!publicUrl.publicUrl) {
+        throw new Error('Failed to get public URL for uploaded image')
+      }
+
+      // Update the ngo_activities table with the image URL
+      const { error: updateError } = await supabase
+        .from('ngo_activities')
+        .update({ 
+          image: publicUrl.publicUrl,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', activityId)
+
+      if (updateError) {
+        throw new Error(`Database update failed: ${updateError.message}`)
+      }
+
+      // Update the local state
+      setActivities(prev => prev.map(activity => 
+        activity.id === activityId 
+          ? { ...activity, image: publicUrl.publicUrl }
+          : activity
+      ))
+
+      console.log('Image uploaded successfully:', publicUrl.publicUrl)
+
+    } catch (error) {
+      console.error('Error uploading image:', error)
+      alert(`Failed to upload image: ${error.message}`)
+    } finally {
+      setImageUploading(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(activityId)
+        return newSet
+      })
+    }
+  }
+
+  // Trigger file input for image upload
+  const triggerImageUpload = (activityId) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.onchange = (e) => {
+      const file = e.target.files[0]
+      if (file) {
+        // Validate file size (max 5MB)
+        if (file.size > 5 * 1024 * 1024) {
+          alert('Image size should be less than 5MB')
+          return
+        }
+        
+        // Validate file type
+        if (!file.type.startsWith('image/')) {
+          alert('Please select an image file')
+          return
+        }
+
+        handleImageUpload(activityId, file)
+      }
+    }
+    input.click()
+  }
+
   // Fetch blog posts when component mounts or when content tab is activated
   useEffect(() => {
     if (activeTab === 'content') {
@@ -948,6 +1043,27 @@ const NGODashboard = ({ navigate }) => {
             
             {!isCompact && (
               <div className="flex gap-1">
+                {activity.status === 'completed' && (
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      triggerImageUpload(activity.id)
+                    }}
+                    disabled={imageUploading.has(activity.id)}
+                    className={`p-2 ${
+                      imageUploading.has(activity.id) 
+                        ? 'text-gray-400 cursor-not-allowed' 
+                        : 'text-green-600 hover:bg-green-50'
+                    } rounded-lg transition-colors`}
+                    title={activity.image ? 'Update photo' : 'Add photo'}
+                  >
+                    {imageUploading.has(activity.id) ? (
+                      <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
+                    ) : (
+                      <Camera className="h-4 w-4" />
+                    )}
+                  </button>
+                )}
                 <button 
                   onClick={(e) => {
                     e.stopPropagation()
@@ -973,21 +1089,43 @@ const NGODashboard = ({ navigate }) => {
         </div>
         
         {!isCompact && (
-          <div className="flex justify-between items-center text-sm">
-            <div className="flex items-center text-gray-600">
-              <Users className="h-4 w-4 mr-1" />
-              {activity.registeredVolunteers}/{activity.expectedVolunteers} volunteers
-            </div>
-            <div className="flex items-center gap-4">
+          <>
+            {/* Show activity image if it exists and activity is completed */}
+            {activity.status === 'completed' && activity.image && (
+              <div className="mb-4">
+                <img 
+                  src={activity.image} 
+                  alt={`${activity.title} completion photo`}
+                  className="w-full h-32 object-cover rounded-lg"
+                  onError={(e) => {
+                    e.target.style.display = 'none'
+                  }}
+                />
+              </div>
+            )}
+            
+            <div className="flex justify-between items-center text-sm">
               <div className="flex items-center text-gray-600">
-                <TreePine className="h-4 w-4 mr-1" />
-                {activity.saplings} saplings
+                <Users className="h-4 w-4 mr-1" />
+                {activity.registeredVolunteers}/{activity.expectedVolunteers} volunteers
               </div>
-              <div className="text-xs text-green-600 font-medium">
-                Click to view details →
+              <div className="flex items-center gap-4">
+                <div className="flex items-center text-gray-600">
+                  <TreePine className="h-4 w-4 mr-1" />
+                  {activity.saplings} saplings
+                </div>
+                {activity.status === 'completed' && activity.image && (
+                  <div className="flex items-center text-green-600 text-xs">
+                    <Camera className="h-3 w-3 mr-1" />
+                    Photo added
+                  </div>
+                )}
+                <div className="text-xs text-green-600 font-medium">
+                  Click to view details →
+                </div>
               </div>
             </div>
-          </div>
+          </>
         )}
       </div>
     </div>
@@ -1296,6 +1434,60 @@ const NGODashboard = ({ navigate }) => {
                     </div>
                   </div>
                 </div>
+
+                {/* Activity Image Section for Completed Activities */}
+                {selectedActivity.status === 'completed' && (
+                  <div className="border-b border-gray-200 pb-6 mb-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-gray-900">Activity Photo</h3>
+                      <button
+                        onClick={() => triggerImageUpload(selectedActivity.id)}
+                        disabled={imageUploading.has(selectedActivity.id)}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          imageUploading.has(selectedActivity.id)
+                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                            : selectedActivity.image
+                            ? 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                            : 'bg-green-50 text-green-600 hover:bg-green-100'
+                        }`}
+                      >
+                        {imageUploading.has(selectedActivity.id) ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
+                            Uploading...
+                          </>
+                        ) : (
+                          <>
+                            <Camera className="h-4 w-4" />
+                            {selectedActivity.image ? 'Update Photo' : 'Add Photo'}
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    
+                    {selectedActivity.image ? (
+                      <div className="relative">
+                        <img 
+                          src={selectedActivity.image} 
+                          alt={`${selectedActivity.title} completion photo`}
+                          className="w-full max-w-2xl h-64 object-cover rounded-lg shadow-md"
+                          onError={(e) => {
+                            e.target.src = 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?w=400&h=250&fit=crop'
+                          }}
+                        />
+                        <div className="absolute top-2 right-2 bg-green-500 text-white px-2 py-1 rounded-full text-xs font-medium">
+                          ✓ Photo Added
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="w-full max-w-2xl h-64 bg-gray-100 rounded-lg flex flex-col items-center justify-center text-gray-500">
+                        <Camera className="h-12 w-12 mb-2" />
+                        <p className="text-sm font-medium mb-1">No photo uploaded yet</p>
+                        <p className="text-xs">Add a photo to showcase your completed activity</p>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Registered Users Section */}
                 <div>
@@ -1651,6 +1843,15 @@ const NGODashboard = ({ navigate }) => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
+      {/* Hidden File Input for Image Upload */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept="image/*"
+        onChange={handleImageUpload}
+        className="hidden"
+      />
+      
       {/* Left Sidebar - Fixed */}
       <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-screen sticky top-0">
         {/* Logo Section */}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabaseClient';
 import CircularText from './features/CircularText';
 import DecryptedText from './features/DecryptedText';
 import { 
@@ -35,6 +36,9 @@ export default function LandingPage({ navigate }){
   });
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [successStories, setSuccessStories] = useState([])
+  const [storiesLoading, setStoriesLoading] = useState(true)
+  const [currentStory, setCurrentStory] = useState(0);
 
   const scrollToSection = (id) => {
     try {
@@ -76,27 +80,68 @@ export default function LandingPage({ navigate }){
     return () => clearInterval(timer);
   }, []);
 
-  const [currentStory, setCurrentStory] = useState(0);
-  const successStories = [
-    {
-      title: "Planted 200 saplings in Chennai",
-      date: "July 2025",
-      image: "https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?w=400&h=250&fit=crop",
-      participants: 45
-    },
-    {
-      title: "Mangrove restoration in Mumbai",
-      date: "June 2025", 
-      image: "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=400&h=250&fit=crop",
-      participants: 72
-    },
-    {
-      title: "Urban forest creation in Bangalore",
-      date: "May 2025",
-      image: "https://images.unsplash.com/photo-1574263867128-a3d5c1b1deec?w=400&h=250&fit=crop",
-      participants: 38
+  // Fetch completed NGO activities for success stories
+  const fetchSuccessStories = async () => {
+    try {
+      setStoriesLoading(true)
+      
+      // Fetch completed activities with NGO details
+      const { data: activities, error: activitiesError } = await supabase
+        .from('ngo_activities')
+        .select(`
+          *,
+          ngo_details (
+            name,
+            description
+          )
+        `)
+        .eq('status', 'completed')
+        .order('activity_date', { ascending: false })
+        .limit(6)
+
+      if (activitiesError) {
+        console.error('Error fetching success stories:', activitiesError)
+        return
+      }
+
+      // Transform the data for the success stories format
+      const transformedStories = activities?.map(activity => ({
+        id: activity.id,
+        title: activity.title,
+        description: activity.description,
+        date: new Date(activity.activity_date).toLocaleDateString('en-US', { 
+          month: 'long', 
+          year: 'numeric' 
+        }),
+        image: activity.image || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?w=400&h=250&fit=crop', // fallback image
+        participants: activity.volunteer_count || 0,
+        location: activity.location,
+        ngo_name: activity.ngo_details?.name || 'Anonymous NGO',
+        ngo_description: activity.ngo_details?.description,
+        completion_date: activity.activity_date,
+        saplings_planted: activity.saplings_planted || 0,
+        pollution_score: activity.pollution_score,
+        aqi: activity.aqi
+      })) || []
+
+      setSuccessStories(transformedStories)
+    } catch (error) {
+      console.error('Error fetching success stories:', error)
+    } finally {
+      setStoriesLoading(false)
     }
-  ];
+  }
+
+  useEffect(() => {
+    fetchSuccessStories()
+  }, [])
+
+  // Reset current story when stories change
+  useEffect(() => {
+    if (successStories.length > 0 && currentStory >= successStories.length) {
+      setCurrentStory(0)
+    }
+  }, [successStories.length, currentStory])
 
   const nextStory = () => {
     setCurrentStory((prev) => (prev + 1) % successStories.length);
@@ -389,60 +434,122 @@ export default function LandingPage({ navigate }){
             <p className="text-xl text-gray-600">Real impact from our amazing community</p>
           </div>
           
-          <div className="max-w-4xl mx-auto relative">
-            <div className="bg-white rounded-3xl shadow-xl overflow-hidden">
-              <div className="md:flex">
-                <div className="md:w-1/2">
-                  <img 
-                    src={successStories[currentStory].image} 
-                    alt={successStories[currentStory].title}
-                    className="w-full h-64 md:h-full object-cover"
-                  />
-                </div>
-                <div className="md:w-1/2 p-8 md:p-12 flex flex-col justify-center">
-                  <div className="text-green-600 font-semibold mb-2">
-                    {successStories[currentStory].date}
+          {storiesLoading ? (
+            <div className="max-w-4xl mx-auto">
+              <div className="bg-white rounded-3xl shadow-xl overflow-hidden animate-pulse">
+                <div className="md:flex">
+                  <div className="md:w-1/2 bg-gray-200 h-64 md:h-80"></div>
+                  <div className="md:w-1/2 p-8 md:p-12">
+                    <div className="bg-gray-200 h-4 w-24 mb-4 rounded"></div>
+                    <div className="bg-gray-200 h-8 w-3/4 mb-4 rounded"></div>
+                    <div className="bg-gray-200 h-4 w-32 mb-6 rounded"></div>
+                    <div className="bg-gray-200 h-10 w-32 rounded-full"></div>
                   </div>
-                  <h3 className="text-3xl font-bold text-gray-800 mb-4">
-                    {successStories[currentStory].title}
-                  </h3>
-                  <div className="flex items-center text-gray-600 mb-6">
-                    <Users size={20} className="mr-2" />
-                    <span>{successStories[currentStory].participants} participants</span>
-                  </div>
-                  <button className="bg-green-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-green-700 transition-colors duration-300 flex items-center gap-2 w-fit">
-                    View Details
-                    <ExternalLink size={16} />
-                  </button>
                 </div>
               </div>
             </div>
-            
-            <button 
-              onClick={prevStory}
-              className="absolute left-4 top-1/2 transform -translate-y-1/2 w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center hover:bg-gray-50 transition-colors duration-300"
-            >
-              <ChevronLeft className="text-gray-600" size={24} />
-            </button>
-            <button 
-              onClick={nextStory}
-              className="absolute right-4 top-1/2 transform -translate-y-1/2 w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center hover:bg-gray-50 transition-colors duration-300"
-            >
-              <ChevronRight className="text-gray-600" size={24} />
-            </button>
-            
-            <div className="flex justify-center mt-8 space-x-2">
-              {successStories.map((_, index) => (
-                <button
-                  key={index}
-                  onClick={() => setCurrentStory(index)}
-                  className={`w-3 h-3 rounded-full transition-colors duration-300 ${
-                    index === currentStory ? 'bg-green-600' : 'bg-gray-300'
-                  }`}
-                />
-              ))}
+          ) : successStories.length === 0 ? (
+            <div className="max-w-4xl mx-auto text-center">
+              <div className="bg-white rounded-3xl shadow-xl p-12">
+                <TreePine size={64} className="mx-auto mb-6 text-gray-400" />
+                <h3 className="text-2xl font-bold text-gray-800 mb-4">No Success Stories Yet</h3>
+                <p className="text-gray-600 mb-8">Be the first NGO to complete an activity and share your success!</p>
+                <button 
+                  onClick={() => navigate && navigate('auth')}
+                  className="bg-green-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-green-700 transition-colors duration-300"
+                >
+                  Start Your Journey
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="max-w-4xl mx-auto relative">
+              <div className="bg-white rounded-3xl shadow-xl overflow-hidden">
+                <div className="md:flex">
+                  <div className="md:w-1/2">
+                    <img 
+                      src={successStories[currentStory]?.image} 
+                      alt={successStories[currentStory]?.title}
+                      className="w-full h-64 md:h-full object-cover"
+                      onError={(e) => {
+                        e.target.src = 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?w=400&h=250&fit=crop'
+                      }}
+                    />
+                  </div>
+                  <div className="md:w-1/2 p-8 md:p-12 flex flex-col justify-center">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="text-green-600 font-semibold">
+                        {successStories[currentStory]?.date}
+                      </div>
+                      {successStories[currentStory]?.pollution_score && (
+                        <span className="px-2 py-1 bg-orange-100 text-orange-800 text-xs font-medium rounded-full">
+                          High Impact Area
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="text-3xl font-bold text-gray-800 mb-2">
+                      {successStories[currentStory]?.title}
+                    </h3>
+                    <p className="text-sm text-green-600 font-medium mb-4">
+                      by {successStories[currentStory]?.ngo_name}
+                    </p>
+                    <p className="text-gray-600 mb-4 line-clamp-2">
+                      {successStories[currentStory]?.description}
+                    </p>
+                    <div className="space-y-2 mb-6">
+                      <div className="flex items-center text-gray-600">
+                        <Users size={16} className="mr-2" />
+                        <span className="text-sm">{successStories[currentStory]?.participants} volunteers participated</span>
+                      </div>
+                      <div className="flex items-center text-gray-600">
+                        <MapPin size={16} className="mr-2" />
+                        <span className="text-sm">{successStories[currentStory]?.location}</span>
+                      </div>
+                      {successStories[currentStory]?.saplings_planted > 0 && (
+                        <div className="flex items-center text-gray-600">
+                          <TreePine size={16} className="mr-2" />
+                          <span className="text-sm">{successStories[currentStory]?.saplings_planted} saplings planted</span>
+                        </div>
+                      )}
+                    </div>
+                    <button className="bg-green-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-green-700 transition-colors duration-300 flex items-center gap-2 w-fit">
+                      View Details
+                      <ExternalLink size={16} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+              
+              {successStories.length > 1 && (
+                <>
+                  <button 
+                    onClick={prevStory}
+                    className="absolute left-4 top-1/2 transform -translate-y-1/2 w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center hover:bg-gray-50 transition-colors duration-300"
+                  >
+                    <ChevronLeft className="text-gray-600" size={24} />
+                  </button>
+                  <button 
+                    onClick={nextStory}
+                    className="absolute right-4 top-1/2 transform -translate-y-1/2 w-12 h-12 bg-white rounded-full shadow-lg flex items-center justify-center hover:bg-gray-50 transition-colors duration-300"
+                  >
+                    <ChevronRight className="text-gray-600" size={24} />
+                  </button>
+                  
+                  <div className="flex justify-center mt-8 space-x-2">
+                    {successStories.map((_, index) => (
+                      <button
+                        key={index}
+                        onClick={() => setCurrentStory(index)}
+                        className={`w-3 h-3 rounded-full transition-colors duration-300 ${
+                          index === currentStory ? 'bg-green-600' : 'bg-gray-300'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
